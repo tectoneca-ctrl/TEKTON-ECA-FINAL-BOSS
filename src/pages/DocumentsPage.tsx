@@ -3,7 +3,7 @@ import { useStore, projectCodes } from '../store'
 import { putFile, getFile, delFile } from '../filedb'
 import { Ic, tone } from '../ui'
 import { localDate } from '../metrics'
-import { Empty, ProgressBar, SuccessState, getLatency, sleep, useToast } from '../ux'
+import { Empty, ProgressBar, SuccessState, useAction, getLatency, sleep, useToast } from '../ux'
 
 const TYPES = ['Permit', 'Contract', 'Plan', 'Certificate']
 const STATUSES = ['Review', 'Approved', 'Returned', 'Expired']
@@ -12,7 +12,7 @@ const MAX = 25 * 1024 * 1024
 const size = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 const today = localDate
 
-interface Up { id: string; name: string; size: number; pct: number; state: 'up' | 'done' | 'err'; msg?: string; file: File; retry: boolean }
+interface Up { id: string; name: string; size: number; pct: number; state: 'up' | 'done' | 'err'; msg?: string; file: File; retry: boolean; project: string; type: string; expires: string }
 const readWithProgress = (f: File, on: (p: number) => void) => new Promise<void>((res, rej) => {
   const r = new FileReader()
   r.onprogress = e => { if (e.lengthComputable) on((e.loaded / e.total) * 85) }
@@ -22,11 +22,13 @@ const readWithProgress = (f: File, on: (p: number) => void) => new Promise<void>
 })
 
 export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
-  const { me, data, add, update, remove } = useStore()
+  const { me, backend, data, add, update, remove } = useStore()
   const toast = useToast()
+  const actions = useAction()
+  const reserved = useRef(new Map<string, { id: string; fileId: string }>())
   const docs = data.documents ?? []
   const sites = projectCodes(data.projects ?? [])
-  const [project, setProject] = useState(sites[0]?.code ?? 'P-001')
+  const [project, setProject] = useState(sites[0]?.code ?? '')
   const [type, setType] = useState(TYPES[0])
   const [expires, setExpires] = useState('')
   const [drag, setDrag] = useState(false)
@@ -39,22 +41,38 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
   const send = async (u: Up) => {
     patch(u.id, { pct: 2, state: 'up', msg: undefined })
     try {
-      await readWithProgress(u.file, p => patch(u.id, { pct: p }))
-      if (getLatency()) await sleep(250)
-      const fid = `f-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-      await putFile(fid, u.file)
-      add('documents', { title: u.file.name.replace(/\.[^.]+$/, ''), project, type, expires, status: 'Review', fileId: fid, fileName: u.file.name, size: String(u.file.size), mime: u.file.type, by: me?.name ?? '', date: today() }, true)
+      if (!u.project) throw new Error('Create or choose a project first.')
+      const meta = { title: u.file.name.replace(/\.[^.]+$/, ''), project: u.project, type: u.type, expires: u.expires, status: 'Review', fileName: u.file.name, size: String(u.file.size), mime: u.file.type, by: me?.name ?? '', date: today() }
+      if (backend === 'supabase') {
+        let ref = reserved.current.get(u.id)
+        if (!ref) {
+          const id = await add('documents', meta, true)
+          ref = { id, fileId: u.project + '/' + id + '/' + crypto.randomUUID() }
+          reserved.current.set(u.id, ref)
+        }
+        patch(u.id, { pct: 10 })
+        await putFile(ref.fileId, u.file)
+        patch(u.id, { pct: 90 })
+        await update('documents', ref.id, { fileId: ref.fileId }, true)
+        reserved.current.delete(u.id)
+      } else {
+        await readWithProgress(u.file, p => patch(u.id, { pct: p }))
+        if (getLatency()) await sleep(250)
+        const fid = crypto.randomUUID()
+        await putFile(fid, u.file)
+        await add('documents', { ...meta, fileId: fid }, true)
+      }
       patch(u.id, { pct: 100, state: 'done' })
       toast.success(`${u.file.name} uploaded · sent for review`)
-    } catch {
-      patch(u.id, { state: 'err', msg: 'Upload failed. Check your connection or storage space.', retry: true })
+    } catch (e) {
+      patch(u.id, { state: 'err', msg: e instanceof Error ? e.message : 'Upload failed.', retry: true })
     }
   }
   const upload = (files: FileList | File[]) => {
     const list = Array.from(files).map<Up>(f => {
       const id = `u-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       const bad = !OK.test(f.name) ? 'Unsupported file type' : f.size > MAX ? 'Larger than 25 MB' : undefined
-      return { id, name: f.name, size: f.size, pct: bad ? 100 : 0, state: bad ? 'err' : 'up', msg: bad, file: f, retry: false }
+      return { id, name: f.name, size: f.size, pct: bad ? 100 : 0, state: bad ? 'err' : 'up', msg: bad, file: f, retry: false, project, type, expires }
     })
     if (!list.length) return
     setUps(x => [...list, ...x].slice(0, 8))
@@ -63,15 +81,21 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
   }
   const onDrop = (e: DragEvent) => { e.preventDefault(); setDrag(false); if (!readOnly) upload(e.dataTransfer.files) }
   const view = async (id: string, download?: string) => {
-    const b = await getFile(id)
-    if (!b) return toast.error('File not found in this browser.')
-    const u = URL.createObjectURL(b)
+    let b: Blob | undefined
+    try { b = await getFile(id) } catch (e) { toast.error((e as Error).message); return }
+    if (!b) return toast.error('File is unavailable or access has changed.')
+    if (!download && !['application/pdf','image/png','image/jpeg'].includes(b.type)) download = 'document'
+    const u = URL.createObjectURL(download ? new Blob([b], { type: 'application/octet-stream' }) : b)
     if (download) { const a = document.createElement('a'); a.href = u; a.download = download; a.click() } else window.open(u, '_blank')
     setTimeout(() => URL.revokeObjectURL(u), 60000)
   }
   const del = async (id: string, fileId?: string) => {
     if (!confirm('Delete this document?')) return
-    try { if (fileId) await delFile(fileId); remove('documents', id) } catch { toast.error('Could not delete the file.', () => void del(id, fileId)) }
+    try {
+      await remove('documents', id, true)
+      if (fileId) await delFile(fileId)
+      toast.success('Document deleted')
+    } catch (e) { toast.error('Delete failed: ' + (e as Error).message) }
   }
   const rows = docs.filter(d => (flt === 'All' || d.status === flt) && JSON.stringify(d).toLowerCase().includes(q.toLowerCase()))
   const allDone = ups.length > 0 && ups.every(u => u.state === 'done')
@@ -124,7 +148,7 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
                 <td className="muted">{d.by ? `${d.by.split(' ')[0]} · ${d.date}` : 'Sample record'}</td>
                 <td className="muted">{d.expires || '—'}</td>
                 <td>{readOnly ? <span className={`chip ${tone(d.status)}`}>{d.status}</span>
-                  : <select className={`chip ${tone(d.status)}`} value={d.status} onChange={e => update('documents', d.id, { status: e.target.value })}>{STATUSES.map(s => <option key={s}>{s}</option>)}</select>}</td>
+                  : <select className={`chip ${tone(d.status)}`} value={d.status} disabled={actions.pending} onChange={e => { const status = e.target.value; void actions.run(() => update('documents', d.id, { status, _version: d._version }, true), 'Document updated') }}>{STATUSES.map(s => <option key={s}>{s}</option>)}</select>}</td>
                 <td><span className="row">
                   <button className="ghost sm" disabled={!d.fileId} onClick={() => d.fileId && view(d.fileId)}>Open</button>
                   <button className="ghost sm" disabled={!d.fileId} onClick={() => d.fileId && view(d.fileId, d.fileName)}>Download</button>

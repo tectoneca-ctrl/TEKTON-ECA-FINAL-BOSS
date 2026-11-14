@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useStore, Rec } from '../store'
+import { useStore, Rec, Mutation } from '../store'
 import { TYPES, sections, siteStats, typeSummary, isBlank } from '../checklist'
 import { Card, Strip, Prog } from './widgets'
-import { Empty, useToast } from '../ux'
+import { Empty, useToast, useAction } from '../ux'
 import { tone } from '../ui'
 import { localDate } from '../metrics'
 
@@ -88,14 +88,15 @@ const BLANK = { label: '', key: false, out: '', outKey: false, status: 'Pending'
 const short = (d: string) => (d ? d.slice(5) : '')
 
 function Board({ code }: { code: string }) {
-  const { me, data, add, update, remove } = useStore()
+  const { me, backend, data, batch, update } = useStore()
   const toast = useToast()
+  const { run, pending } = useAction()
   const p = (data.projects ?? []).find(x => x.code === code)
   const rows = (data.checklist ?? []).filter(r => r.project === code)
   const [dlg, setDlg] = useState<Dlg | null>(null)
   const [form, setForm] = useState(BLANK)
   const [err, setErr] = useState('')
-  const edit = !!me && EDIT.includes(me.role)
+  const edit = !pending && !!me && EDIT.includes(me.role)
   if (!p) return <><h1>Site not found</h1><a className="btn" href="#sitedocs">Back to site documents</a></>
   const secs = sections(rows), st = siteStats(rows)
   const tplRows = (data.templates ?? []).filter(t => t.type === p.type)
@@ -106,18 +107,17 @@ function Board({ code }: { code: string }) {
   const suggOut = uniq([...tplRows.map(t => t.out), ...(data.checklist ?? []).map(r => r.out)])
   const suggSec = uniq([...tplRows.map(t => t.section), ...rows.map(r => r.section)])
   const isSec = !!dlg && (dlg.mode === 'section' || dlg.mode === 'rename')
-  const upd = (r: Rec, v: Record<string, string>) => update('checklist', r.id, v, true)
+  const upd = (r: Rec, v: Record<string, string>) => update('checklist', r.id, { ...v, _version: r._version }, true)
 
-  const load = () => {
-    tplRows.forEach(t => add('checklist', { project: code, section: t.section, label: t.label, key: t.key, status: 'Pending', date: '', remarks: '', out: t.out, outKey: t.outKey, outStatus: 'Pending', outDate: '', order: t.order }, true))
-    toast.success(`${p.type} checklist loaded`)
+  const rowOp = (r: Rec, data: Record<string,string>): Mutation => ({ action: 'update', module: 'checklist', id: r.id, data: { ...data, _version: r._version } })
+  const load = async () => {
+    await batch(tplRows.map(t => ({ action: 'insert', module: 'checklist', data: { project: code, section: t.section, label: t.label, key: t.key, status: 'Pending', date: '', remarks: '', out: t.out, outKey: t.outKey, outStatus: 'Pending', outDate: '', order: t.order } })))
+    toast.success(p.type + ' checklist loaded')
   }
-  const toggleDoc = (r: Rec) => upd(r, r.status === 'Done' ? { status: 'Pending', date: '' } : { status: 'Done', date: localDate() })
+  const toggleDoc = (r: Rec) => { void run(() => upd(r, r.status === 'Done' ? { status: 'Pending', date: '' } : { status: 'Done', date: localDate() })) }
   const toggleOut = (r: Rec, ready: boolean) => {
-    if (r.outStatus === 'Out') return upd(r, { outStatus: 'Pending', outDate: '' })
-    upd(r, { outStatus: 'Out', outDate: localDate() })
-    toast.success(`${r.out} released (OUT)`)
-    if (!ready) toast.info(r.label ? `${r.label} is not marked done yet` : 'Some documents in this section are still pending')
+    if (backend === 'supabase' && !ready && r.outStatus !== 'Out') { toast.error('Complete the required documents first.'); return }
+    void run(() => upd(r, r.outStatus === 'Out' ? { outStatus: 'Pending', outDate: '' } : { outStatus: 'Out', outDate: localDate() }), 'OUT status updated')
   }
   const open = (d: Dlg) => {
     const r = d.rec
@@ -128,10 +128,11 @@ function Board({ code }: { code: string }) {
     const list = rows.filter(x => x.section === r.section).sort((a, b) => Number(a.order) - Number(b.order))
     const o = list[list.findIndex(x => x.id === r.id) + dir]
     if (!o) return
-    upd(r, { order: o.order }); upd(o, { order: r.order })
+    void run(() => batch([rowOp(r, { order: o.order }), rowOp(o, { order: r.order })]))
   }
-  const save = () => {
+  const save = async () => {
     if (!dlg) return
+    const ops: Mutation[] = []
     const name = form.label.trim(), out = form.out.trim()
     if (isSec && !name) return setErr('Section name is required.')
     if (!isSec && !name && !out) return setErr('Enter a document, an OUT, or both.')
@@ -140,55 +141,56 @@ function Board({ code }: { code: string }) {
       if (dupe(dlg.rec.section, name, dlg.rec.id)) return setErr('That document already exists in this section.')
       const doneDate = form.status === 'Done' ? form.date || localDate() : ''
       const outDate = form.outStatus === 'Out' ? form.outDate || localDate() : ''
-      upd(dlg.rec, { label: name, key: form.key ? 'yes' : 'no', status: name ? form.status : 'Pending', date: name ? doneDate : '', remarks: form.remarks, out, outKey: form.outKey ? 'yes' : 'no', outStatus: out ? form.outStatus : 'Pending', outDate: out ? outDate : '' })
+      ops.push(rowOp(dlg.rec, { label: name, key: form.key ? 'yes' : 'no', status: name ? form.status : 'Pending', date: name ? doneDate : '', remarks: form.remarks, out, outKey: form.outKey ? 'yes' : 'no', outStatus: out ? form.outStatus : 'Pending', outDate: out ? outDate : '' }))
     } else if (dlg.mode === 'add') {
       const section = dlg.section ?? ''
       if (dupe(section, name)) return setErr('That document already exists in this section.')
-      add('checklist', { project: code, section, label: name, key: form.key ? 'yes' : 'no', status: 'Pending', date: '', remarks: form.remarks, out, outKey: form.outKey ? 'yes' : 'no', outStatus: 'Pending', outDate: '', order: String(nextOrder) }, true)
-      if (form.tpl && !tplRows.some(t => t.section === section && t.label.toLowerCase() === name.toLowerCase() && t.out.toLowerCase() === out.toLowerCase())) add('templates', { type: p.type, section, label: name, key: form.key ? 'yes' : 'no', out, outKey: form.outKey ? 'yes' : 'no', order: String(tplOrder) }, true)
+      ops.push({ action: 'insert', module: 'checklist', data: { project: code, section, label: name, key: form.key ? 'yes' : 'no', status: 'Pending', date: '', remarks: form.remarks, out, outKey: form.outKey ? 'yes' : 'no', outStatus: 'Pending', outDate: '', order: String(nextOrder) } })
+      if (form.tpl && !tplRows.some(t => t.section === section && t.label.toLowerCase() === name.toLowerCase() && t.out.toLowerCase() === out.toLowerCase())) ops.push({ action: 'insert', module: 'templates', data: { type: p.type, section, label: name, key: form.key ? 'yes' : 'no', out, outKey: form.outKey ? 'yes' : 'no', order: String(tplOrder) } })
     } else if (dlg.mode === 'rename') {
       const old = dlg.section ?? ''
       if (name !== old && secs.some(x => x.name.toLowerCase() === name.toLowerCase())) return setErr('A section with that name already exists.')
-      rows.filter(r => r.section === old).forEach(r => upd(r, { section: name }))
-      if (form.tpl) tplRows.filter(t => t.section === old).forEach(t => update('templates', t.id, { section: name }, true))
+      rows.filter(r => r.section === old).forEach(r => ops.push(rowOp(r, { section: name })))
+      if (form.tpl) tplRows.filter(t => t.section === old).forEach(t => ops.push({ action: 'update', module: 'templates', id: t.id, data: { section: name, _version: t._version } }))
     } else {
       if (secs.some(x => x.name.toLowerCase() === name.toLowerCase())) return setErr('That section already exists.')
-      add('checklist', { project: code, section: name, label: '', key: 'no', status: 'Pending', date: '', remarks: '', out: '', outKey: 'no', outStatus: 'Pending', outDate: '', order: String(nextOrder) }, true)
-      if (form.tpl && !tplRows.some(t => t.section === name)) add('templates', { type: p.type, section: name, label: '', key: 'no', out: '', outKey: 'no', order: String(tplOrder) }, true)
+      ops.push({ action: 'insert', module: 'checklist', data: { project: code, section: name, label: '', key: 'no', status: 'Pending', date: '', remarks: '', out: '', outKey: 'no', outStatus: 'Pending', outDate: '', order: String(nextOrder) } })
+      if (form.tpl && !tplRows.some(t => t.section === name)) ops.push({ action: 'insert', module: 'templates', data: { type: p.type, section: name, label: '', key: 'no', out: '', outKey: 'no', order: String(tplOrder) } })
     }
+    await batch(ops)
     toast.success('Saved'); setDlg(null)
   }
-  const delRow = () => {
+  const delRow = async () => {
     const r = dlg?.rec
     if (!r || !confirm('Remove this row from the checklist?')) return
-    if (rows.filter(x => x.section === r.section).length === 1) upd(r, { label: '', out: '', key: 'no', outKey: 'no', status: 'Pending', date: '', outStatus: 'Pending', outDate: '', remarks: '' })
-    else remove('checklist', r.id, true)
+    if (rows.filter(x => x.section === r.section).length === 1) await upd(r, { label: '', out: '', key: 'no', outKey: 'no', status: 'Pending', date: '', outStatus: 'Pending', outDate: '', remarks: '' })
+    else await batch([{ action: 'delete', module: 'checklist', id: r.id, data: { _version: r._version } }])
     toast.success('Removed'); setDlg(null)
   }
-  const delSection = (name: string) => {
-    const n = rows.filter(r => r.section === name).length
-    if (!confirm(`Delete "${name}" and its ${n} row(s) from this site?`)) return
-    rows.filter(r => r.section === name).forEach(r => remove('checklist', r.id, true))
+  const delSection = async (name: string) => {
+    if (!confirm('Delete this section and all its rows?')) return
+    await batch(rows.filter(r => r.section === name).map(r => ({ action: 'delete', module: 'checklist', id: r.id, data: { _version: r._version } })))
     toast.success('Section removed')
   }
-  const saveTpl = () => {
-    if (!confirm(`Replace the ${p.type} template with this site's checklist? Other sites keep what they already have.`)) return
-    tplRows.forEach(t => remove('templates', t.id, true))
-    ;[...rows].sort((a, b) => Number(a.order) - Number(b.order)).forEach((r, i) => add('templates', { type: p.type, section: r.section, label: r.label, key: r.key, out: r.out, outKey: r.outKey, order: String(i + 1) }, true))
-    toast.success(`${p.type} template updated`)
+  const saveTpl = async () => {
+    if (!confirm('Replace the ' + p.type + ' template with this checklist? Existing sites keep their own checklist.')) return
+    const ops: Mutation[] = tplRows.map(t => ({ action: 'delete', module: 'templates', id: t.id, data: { _version: t._version } }))
+    ;[...rows].sort((a,b) => Number(a.order)-Number(b.order)).forEach((r,i) => ops.push({ action: 'insert', module: 'templates', data: { type: p.type, section: r.section, label: r.label, key: r.key, out: r.out, outKey: r.outKey, order: String(i+1) } }))
+    await batch(ops)
+    toast.success(p.type + ' template updated')
   }
 
   return (
     <>
       <div className="head">
         <div><a className="muted" href={`#sitedocs/${p.type}`}>← {p.type}</a><h1>{p.name}</h1><p className="muted">Site ID {p.code} · {p.client} · {p.site}</p></div>
-        <div className="row">{chip(p.status)}{edit && rows.length > 0 && <button className="ghost" onClick={saveTpl} title={`Use this site's checklist as the ${p.type} template`}>Save as template</button>}<a className="btnlink" href={`#project/${p.code}`}>Project page</a></div>
+        <div className="row">{chip(p.status)}{edit && rows.length > 0 && <button className="ghost" onClick={() => void run(saveTpl)} title={`Use this site's checklist as the ${p.type} template`}>Save as template</button>}<a className="btnlink" href={`#project/${p.code}`}>Project page</a></div>
       </div>
       <Strip items={[['Documents', `${st.done}/${st.items}`, st.items ? `${st.pct}%` : '', st.pct === 100 ? 'g' : ''], ['OUT released', `${st.outed}/${st.outs}`, '', st.outed ? 'g' : ''], ['Key items pending', String(st.keyPending), '', st.keyPending ? 'a' : ''], ['Sections complete', `${secs.filter(s => s.ready).length}/${secs.length}`, '', '']]} />
 
       {!rows.length ? (
         <div className="card"><Empty icon="documents" title="No checklist for this site yet" hint={edit ? `Load the ${p.type} template, or start blank and add your own sections and rows.` : 'The Documents team has not set up this checklist yet.'}
-          action={edit ? <span className="row">{tplRows.length > 0 && <button onClick={load}>Load {p.type} template</button>}<button className={tplRows.length ? 'ghost' : ''} onClick={() => open({ mode: 'section' })}>Start blank · add a section</button></span> : undefined} /></div>
+          action={edit ? <span className="row">{tplRows.length > 0 && <button onClick={() => void run(load)}>Load {p.type} template</button>}<button className={tplRows.length ? 'ghost' : ''} onClick={() => open({ mode: 'section' })}>Start blank · add a section</button></span> : undefined} /></div>
       ) : (
         <div className="xboard">
           {secs.map(s => (
@@ -210,7 +212,7 @@ function Board({ code }: { code: string }) {
                   </div>)
               })}
               {!s.rows.some(r => !isBlank(r)) && <div className="xr xnone"><div className="xd muted">No rows yet</div><div className="xo" /></div>}
-              {edit && <div className="xf"><button className="ghost sm" onClick={() => open({ mode: 'add', section: s.name })}>+ Row</button><span className="grow" /><button className="ghost sm" onClick={() => open({ mode: 'rename', section: s.name })}>Rename</button><button className="ghost sm danger" onClick={() => delSection(s.name)}>Delete</button></div>}
+              {edit && <div className="xf"><button className="ghost sm" onClick={() => open({ mode: 'add', section: s.name })}>+ Row</button><span className="grow" /><button className="ghost sm" onClick={() => open({ mode: 'rename', section: s.name })}>Rename</button><button className="ghost sm danger" onClick={() => void run(() => delSection(s.name))}>Delete</button></div>}
             </div>))}
           {edit && <button className="xadd" onClick={() => open({ mode: 'section' })}>+ Section</button>}
         </div>
@@ -238,8 +240,8 @@ function Board({ code }: { code: string }) {
             <datalist id="ck-sec">{suggSec.map(x => <option key={x} value={x} />)}</datalist>
             {err && <p className="formerr">{err}</p>}
             <div className="row end">
-              {dlg.mode === 'edit' && dlg.rec && <><button className="ghost sm" title="Move up" onClick={() => dlg.rec && move(dlg.rec, -1)}>↑</button><button className="ghost sm" title="Move down" onClick={() => dlg.rec && move(dlg.rec, 1)}>↓</button><button className="ghost danger" onClick={delRow}>Remove</button></>}
-              <span className="grow" /><button className="ghost" onClick={() => setDlg(null)}>Cancel</button><button onClick={save}>Save</button>
+              {dlg.mode === 'edit' && dlg.rec && <><button className="ghost sm" title="Move up" onClick={() => dlg.rec && move(dlg.rec, -1)}>↑</button><button className="ghost sm" title="Move down" onClick={() => dlg.rec && move(dlg.rec, 1)}>↓</button><button className="ghost danger" disabled={pending} onClick={() => void run(delRow)}>Remove</button></>}
+              <span className="grow" /><button className="ghost" onClick={() => setDlg(null)}>Cancel</button><button disabled={pending} onClick={() => void run(save)}>Save</button>
             </div>
           </div>
         </div>

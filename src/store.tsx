@@ -1,3 +1,5 @@
+import { isCloud } from './backend/client'
+import { CloudStoreProvider } from './backend/CloudStore'
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { MODULES, AUTO_APPROVAL } from './modules'
 import { useToast } from './ux'
@@ -6,7 +8,7 @@ import type { Role } from './roles'
 export interface User { id: number; name: string; email: string; role: Role; password: string; project?: string; avatar?: string; financeViewProject?: string }
 export type Rec = Record<string, string> & { id: string }
 export interface Log { at: string; by: string; msg: string }
-export interface Settings { company: string; vat: number; markup: number; retention: number }
+export interface Settings { version?: number; company: string; vat: number; markup: number; retention: number }
 
 export const DEMO_USERS: User[] = [
   { id: 1, name: 'Dana Admin', email: 'admin@tekton.ph', role: 'admin', password: 'Admin@2026' },
@@ -36,25 +38,34 @@ function usePersisted<T>(key: string, init: T) {
   return [v, s] as const
 }
 
-interface Store {
+export type Awaitable<T> = T | Promise<T>
+export interface Mutation { action: 'insert' | 'update' | 'delete' | 'decide' | 'pay_invoice' | 'generate_payroll'; module: string; id?: string; data?: Record<string, string> }
+export interface FinanceSummary { code: string; name: string; site: string; budget: number; spent: number; billed: number; collected: number; balance: number; overdue: number }
+export interface Store {
+  backend: 'demo' | 'supabase'; readableModules: string[]; financeSummary: FinanceSummary[]
+  batch: (ops: Mutation[]) => Awaitable<void>
+  payInvoice: (invoice: Rec) => Awaitable<void>
   me: User | null; users: User[]; data: Record<string, Rec[]>; log: Log[]; settings: Settings
-  login: (email: string, password: string, remember: boolean) => boolean; logout: () => void
-  setPassword: (id: number, pw: string) => void
-  setAvatar: (url: string) => void
-  verify: (email: string, password: string) => boolean; requestReset: (email: string) => void
-  read: string[]; markRead: (ids: string[]) => void; updateName: (name: string) => void; changePassword: (oldPw: string, newPw: string) => string | null
-  proj: string; setProj: (p: string) => void; addLog: (m: string) => void; setUserProject: (id: number, code: string) => void
-  addUser: (u: Omit<User, 'id'>) => void; setRole: (id: number, r: Role) => void; setFinanceView: (id: number, scope: string) => void; removeUser: (id: number) => void
-  add: (k: string, r: Record<string, string>, quiet?: boolean) => string
-  decideApproval: (a: Rec, status: 'Approved' | 'Rejected') => void
-  update: (k: string, id: string, patch: Record<string, string>, quiet?: boolean) => void
-  remove: (k: string, id: string, quiet?: boolean) => void
-  setSettings: (s: Settings) => void
+  login: (email: string, password: string, remember: boolean) => Awaitable<boolean>; logout: () => Awaitable<void>
+  setPassword: (id: number, pw: string) => Awaitable<void>
+  setAvatar: (url: string) => Awaitable<void>
+  verify: (email: string, password: string) => Awaitable<boolean>; requestReset: (email: string) => Awaitable<void>
+  read: string[]; markRead: (ids: string[]) => Awaitable<void>; updateName: (name: string) => Awaitable<void>; changePassword: (oldPw: string, newPw: string) => Awaitable<string | null>
+  proj: string; setProj: (p: string) => Awaitable<void>; addLog: (m: string) => Awaitable<void>; setUserProject: (id: number, code: string) => Awaitable<void>
+  addUser: (u: Omit<User, 'id'>) => Awaitable<void>; setRole: (id: number, r: Role) => Awaitable<void>; setFinanceView: (id: number, scope: string) => Awaitable<void>; removeUser: (id: number) => Awaitable<void>
+  add: (k: string, r: Record<string, string>, quiet?: boolean) => Awaitable<string>
+  decideApproval: (a: Rec, status: 'Approved' | 'Rejected') => Awaitable<void>
+  update: (k: string, id: string, patch: Record<string, string>, quiet?: boolean) => Awaitable<void>
+  remove: (k: string, id: string, quiet?: boolean) => Awaitable<void>
+  setSettings: (s: Settings) => Awaitable<void>
 }
-const Ctx = createContext<Store>(null as unknown as Store)
-export const useStore = () => useContext(Ctx)
+export const StoreContext = createContext<Store>(null as unknown as Store)
+export const useStore = () => useContext(StoreContext)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  return isCloud ? <CloudStoreProvider>{children}</CloudStoreProvider> : <DemoStoreProvider>{children}</DemoStoreProvider>
+}
+function DemoStoreProvider({ children }: { children: ReactNode }) {
   const toast = useToast()
   const [users, setUsers] = usePersisted<User[]>('tk_users_v3', DEMO_USERS)
   const [data, setData] = usePersisted<Record<string, Rec[]>>('tk_data_v6', SEED_DATA)
@@ -71,6 +82,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 
   const value: Store = {
+    backend: 'demo', readableModules: Object.keys(MODULES), financeSummary: [],
+    batch: async ops => { for (const op of ops) {
+      if (op.action === 'insert') await value.add(op.module, op.data ?? {}, true)
+      if (op.action === 'update') await value.update(op.module, op.id!, op.data ?? {}, true)
+      if (op.action === 'delete') await value.remove(op.module, op.id!, true)
+    } },
+    payInvoice: async invoice => {
+      await value.update('billing', invoice.id, { status: 'Paid' }, true)
+      await value.add('payments', { client: data.projects.find(p => p.code === invoice.project)?.client ?? '', project: invoice.project, amount: invoice.amount, date: new Date().toLocaleDateString('en-CA'), method: 'Bank' }, true)
+    },
     read: me ? readMap[me.id] ?? [] : [],
     markRead: ids => { if (me) setReadMap(m => ({ ...m, [me.id]: [...new Set([...(m[me.id] ?? []), ...ids])].slice(-300) })) },
     setAvatar: url => { if (me) { setUsers(x => x.map(u => (u.id === me.id ? { ...u, avatar: url || undefined } : u))); note(url ? 'Updated profile photo' : 'Removed profile photo') } },
@@ -137,5 +158,5 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     update: (k, id, p, quiet) => { setData(d => ({ ...d, [k]: (d[k] ?? []).map(r => (r.id === id ? { ...r, ...p } : r)) })); if (!quiet) toast.success('Changes saved') },
     remove: (k, id, quiet) => { setData(d => { const gone = (d[k] ?? []).find(r => r.id === id); const next: Record<string, Rec[]> = { ...d, [k]: (d[k] ?? []).filter(r => r.id !== id) }; if (k === 'projects' && gone) next.checklist = (d.checklist ?? []).filter(c => c.project !== gone.code); return next }); note(`Deleted record in ${MODULES[k].title}`); if (!quiet) toast.success('Record deleted') },
   }
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

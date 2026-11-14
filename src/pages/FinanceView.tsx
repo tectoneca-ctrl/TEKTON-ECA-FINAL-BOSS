@@ -4,12 +4,12 @@ import { Empty } from '../ux'
 import { Card, Strip } from './widgets'
 
 export function FinanceView() {
-  const { me, data } = useStore()
+  const { me, data, backend, financeSummary } = useStore()
   if (!me || me.role !== 'documents' || !me.financeViewProject) {
     return <><h1>Access denied</h1><div className="card muted">Walang Finance view-only access ang account na ito.</div></>
   }
 
-  const all = projectMetrics(data)
+  const all = backend === 'supabase' ? financeSummary : projectMetrics(data)
   const rows = me.financeViewProject === 'all' ? all : all.filter(p => p.code === me.financeViewProject)
   const total = rows.reduce((t, p) => ({
     budget: t.budget + p.budget,

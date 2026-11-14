@@ -42,9 +42,16 @@ function BudgetTab({ code }: { code: string }) {
 }
 
 export function ProjectPage({ code }: { code: string }) {
-  const { me, data } = useStore()
+  const { me, data, backend, readableModules, financeSummary } = useStore()
   const [tab, setTab] = useState('Summary')
-  const m = projectMetrics(data).find(x => x.code === code)
+  const original = projectMetrics(data).find(x => x.code === code)
+  const summary = financeSummary.find(x => x.code === code)
+  const m = original ? { ...original, ...summary } : undefined
+  const available = (module: string) => backend === 'demo' || readableModules.includes(module)
+  const shown = (module: string, value: string | number) => available(module) ? value : '?'
+  const canSpend = !!summary || available('expenses') && available('purchases')
+  const canBill = !!summary || available('billing')
+  const canCollect = !!summary || available('payments')
   if (!me) return null
   if (!m) return <><h1>Project not found</h1><a className="btn" href="#overview">Back to overview</a></>
   if (SCOPED.includes(me.role) && me.project && me.project !== code) return <><h1>Access denied</h1><div className="card muted">Hindi ito ang project na naka-assign sa iyo.</div></>
@@ -61,11 +68,11 @@ export function ProjectPage({ code }: { code: string }) {
       </div>
 
       {cur === 'Summary' && <>
-        <Strip items={[['Progress', `${m.progress}%`, m.status, m.status === 'Delayed' ? 'a' : 'g'], ['Budget', short(m.budget), '', ''], ['Spent', short(m.spent), `${m.used}% used`, m.used > 100 ? 'r' : ''], ['Billed', short(m.billed), '', ''], ['Collected', short(m.collected), '', 'g'], ['Balance', short(m.balance), m.overdue ? `${m.overdue} overdue` : '', m.overdue ? 'a' : '']]} />
+        <Strip items={[['Progress', `${m.progress}%`, m.status, m.status === 'Delayed' ? 'a' : 'g'], ['Budget', short(m.budget), '', ''], ['Spent', canSpend ? short(m.spent) : '?', canSpend ? Math.round(m.budget ? m.spent / m.budget * 100 : 0) + '% used' : 'No access', m.used > 100 ? 'r' : ''], ['Billed', canBill ? short(m.billed) : '?', '', ''], ['Collected', canCollect ? short(m.collected) : '?', '', 'g'], ['Balance', canBill && canCollect ? short(m.balance) : '?', m.overdue ? `${m.overdue} overdue` : '', m.overdue ? 'a' : '']]} />
         <div className="g2">
           <Card t="Milestones"><Feed items={rows('progress').map(x => ({ a: x.milestone, t: x.milestone, s: x.date || 'Not started', r: <span className={`chip ${n(x.percent) >= 100 ? '' : n(x.percent) > 0 ? 'warn' : 't'}`}>{n(x.percent)}%</span> }))} /></Card>
           <Card t="Project facts"><div className="facts">
-            {([['Open tasks', open], ['Open incidents', m.incidents], ['Deliveries pending', m.deliveries], ['Documents', `${m.docsOk}/4 required`], ['Crew (latest day)', m.crew], ['OT hours', m.ot], ['Pending purchases', m.pending], ['Equipment on site', m.assets]] as [string, string | number][]).map(([l, v]) => <div key={l}><span className="muted up">{l}</span><b>{v}</b></div>)}</div></Card>
+            {([['Open tasks', shown('tasks', open)], ['Open incidents', shown('incidents', m.incidents)], ['Deliveries pending', shown('deliveries', m.deliveries)], ['Documents', shown('documents', m.docsOk + '/4 required')], ['Crew (latest day)', shown('attendance', m.crew)], ['OT hours', shown('attendance', m.ot)], ['Pending purchases', shown('purchases', m.pending)], ['Equipment on site', shown('assets', m.assets)]] as [string, string | number][]).map(([l, v]) => <div key={l}><span className="muted up">{l}</span><b>{v}</b></div>)}</div></Card>
         </div></>}
 
       {cur === 'Budget' && <BudgetTab code={code} />}

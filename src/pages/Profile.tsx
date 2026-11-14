@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { useStore } from '../store'
+import { useStore, SCOPED } from '../store'
 import { ROLES } from '../roles'
 import { Avatar, Ic, PasswordInput, Strength } from '../ui'
 import { toAvatar } from '../image'
@@ -32,7 +32,7 @@ export function ProfilePage() {
     if (nw !== cf) return setPwErr('New passwords do not match.')
     setPwErr('')
     const res = { e: null as string | null }
-    const ok = await a2.run(() => { res.e = changePassword(cur, nw) })
+    const ok = await a2.run(async () => { res.e = await changePassword(cur, nw) })
     if (!ok) return
     if (res.e) return setPwErr(res.e)
     setCur(''); setNw(''); setCf(''); toast.success('Password changed')
@@ -55,7 +55,7 @@ export function ProfilePage() {
           </div>
           <label><span className="muted">Full name</span><input value={name} onChange={e => setName(e.target.value)} /></label>
           <label><span className="muted">Email</span><input value={me.email} readOnly /></label>
-          <label><span className="muted">Assigned project</span><input value={me.project ?? 'All projects'} readOnly /></label>
+          <label><span className="muted">Assigned project</span><input value={me.project || (SCOPED.includes(me.role) ? 'Unassigned' : 'All projects')} readOnly /></label>
           <div className="row"><Btn busy={a1.pending} onClick={saveName}>Save changes</Btn>{nameErr && <span className="formerr">{nameErr}</span>}</div>
         </div>
         <div className="card form">

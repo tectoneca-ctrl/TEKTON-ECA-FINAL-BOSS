@@ -1,9 +1,10 @@
+import { isCloud } from './backend/client'
 import { ButtonHTMLAttributes, Component, ReactNode, createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import { Ic } from './ui'
 import { LogoMark } from './Logo'
 
 /* ===== network simulation (frontend-only). A real backend replaces the sleep with the actual request. ===== */
-export const getLatency = () => { try { return localStorage.getItem('tk_latency') === 'off' ? 0 : 450 } catch { return 450 } }
+export const getLatency = () => { if (isCloud) return 0; try { return localStorage.getItem('tk_latency') === 'off' ? 0 : 450 } catch { return 450 } }
 export const setLatency = (on: boolean) => { try { localStorage.setItem('tk_latency', on ? 'on' : 'off') } catch { /* ignore */ } }
 export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
@@ -60,7 +61,7 @@ export function useAction() {
       if (ok) toast.success(ok)
       return true
     } catch (e) {
-      toast.error(`${fail}${e instanceof Error && e.message ? `: ${e.message}` : ''}`, () => { void run(fn, ok, fail) })
+      toast.error(`${fail}${e instanceof Error && e.message ? `: ${e.message}` : ''}`, isCloud ? undefined : () => { void run(fn, ok, fail) })
       return false
     } finally { busy.current = false; setPending(false) }
   }

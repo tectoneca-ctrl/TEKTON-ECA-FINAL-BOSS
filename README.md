@@ -1,4 +1,4 @@
-# Tekton ECA (frontend)
+# Tekton ECA
 `npm install && npm run dev`
 
 ## Demo accounts (email / password)
@@ -15,8 +15,8 @@
 | HR | hr@tekton.ph | People@2026 |
 | Finance | finance@tekton.ph | Finance@2026 |
 
-Frontend-only: passwords are plain text in localStorage (demo). Real auth (hashed passwords, JWT, server-side permissions) goes in the backend.
-Reset demo data: `localStorage.clear()` or the button on the error screen.
+In demo mode, accounts and records use browser storage. Supabase mode uses real authentication and server-side permissions; see the setup guide below.
+Reset browser demo data from Settings. Cloud data has no demo-reset action.
 
 ## Project flow
 See [Project Workflow: Setup to Closeout](docs/PROJECT-FLOW.md) for the role-by-role process, document stages, finance approvals, dashboard responsibilities, and current implementation gaps.
@@ -41,3 +41,6 @@ Splash screen, button spinner/pending (`Btn`, `useAction`), skeleton loaders on 
 Live frontend: https://tekton-eca-final-boss.pages.dev
 
 See [Cloudflare Pages deployment](docs/DEPLOYMENT.md) for Direct Upload commands and the current backend status. GitHub pushes do not automatically publish this site.
+
+## Supabase backend
+The backend code is ready for configuration. See [Supabase setup and activation](docs/SUPABASE-SETUP.md). Cloud mode uses real Auth, project permissions, shared records, private files and transactional approvals. The live website remains the previously uploaded demo until a Supabase project is configured and a new build is deployed.

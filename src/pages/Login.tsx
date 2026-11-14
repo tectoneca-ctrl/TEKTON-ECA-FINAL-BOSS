@@ -1,3 +1,4 @@
+import { isCloud } from '../backend/client'
 import { FormEvent, type KeyboardEvent, useEffect, useState } from 'react'
 import { DEMO_USERS, useStore } from '../store'
 import { ROLES } from '../roles'
@@ -7,7 +8,7 @@ import { Btn, SuccessState, getLatency, sleep } from '../ux'
 import { UserAvatar } from '../UserAvatar'
 
 /** Demo build only: set to false before going live so the demo accounts panel disappears. */
-const SHOW_DEMO = true
+const SHOW_DEMO = !isCloud
 const MAX_TRIES = 5
 const LOCK_SECONDS = 30
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -18,7 +19,7 @@ const PITCH: [string, string, string][] = [
 ]
 
 export function Login() {
-  const { login, verify, requestReset } = useStore()
+  const { login, requestReset } = useStore()
   const [mode, setMode] = useState<'in' | 'reset' | 'sent'>('in')
   const [email, setEmail] = useState('')
   const [pw, setPw] = useState('')
@@ -55,11 +56,13 @@ export function Login() {
     if (ee || pe) return shake()
     setBusy(true)
     await wait(700)
-    if (verify(email, pw)) {
-      setOk(true)
-      await wait(650)
-      login(email, pw, remember)
-      location.hash = 'overview'
+    try {
+      if (await login(email, pw, remember)) {
+        setOk(true); location.hash = 'overview'; return
+      }
+    } catch (error) {
+      setBusy(false); shake()
+      setFormErr(error instanceof Error ? error.message : 'Sign in failed. Try again.')
       return
     }
     const t = tries + 1
@@ -75,8 +78,9 @@ export function Login() {
     if (ee) return shake()
     setBusy(true)
     await wait(600)
-    requestReset(email)
-    setBusy(false); setMode('sent')
+    try { await requestReset(email); setMode('sent') }
+    catch (e) { setFormErr((e as Error).message) }
+    finally { setBusy(false) }
   }
   const caps$ = (e: KeyboardEvent<HTMLInputElement>) => setCaps(e.getModifierState('CapsLock'))
   const back = () => { setMode('in'); setEmailErr(''); setFormErr('') }
@@ -134,18 +138,18 @@ export function Login() {
 
         {mode === 'reset' && (
           <form className={`card lgn-card ${shaking ? 'shake' : ''}`} onSubmit={submitReset} noValidate>
-            <header><h1>Reset password</h1><p className="muted">Enter your work email. Your administrator will be notified and will set a new password for you.</p></header>
+            <header><h1>Reset password</h1><p className="muted">{isCloud ? 'Enter your work email to receive a password reset link.' : 'Enter your work email. Your administrator will be notified and will set a new password for you.'}</p></header>
             <label className="fld"><span>Work email</span>
               <input type="email" inputMode="email" autoComplete="username" placeholder="name@company.ph" value={email} aria-invalid={!!emailErr} autoFocus onChange={e => { setEmail(e.target.value); setEmailErr('') }} />
               {emailErr && <em className="ferr">{emailErr}</em>}</label>
-            <Btn className="lgn-submit" busy={busy}>{busy ? 'Sending…' : 'Send request'}</Btn>
+            <div role="alert">{formErr}</div><Btn className="lgn-submit" busy={busy}>{busy ? 'Sending…' : 'Send request'}</Btn>
             <button type="button" className="linkbtn center" onClick={back}>← Back to sign in</button>
           </form>
         )}
 
         {mode === 'sent' && (
           <div className="card lgn-card">
-            <SuccessState title="Request sent" hint="If that email belongs to an account, your administrator has been notified." />
+            <SuccessState title="Request sent" hint={isCloud ? 'If that email belongs to an account, check its inbox for a reset link.' : 'If that email belongs to an account, your administrator has been notified.'} />
             <button type="button" className="lgn-submit" onClick={back}>Back to sign in</button>
           </div>
         )}

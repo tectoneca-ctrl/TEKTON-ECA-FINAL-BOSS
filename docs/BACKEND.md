@@ -1,3 +1,7 @@
+# Implementation status
+
+The Supabase implementation and activation steps are documented in [SUPABASE-SETUP.md](SUPABASE-SETUP.md). This older contract describes planned endpoints; the implemented adapter uses PostgreSQL RPCs and one Edge Function instead. Hosted Auth and Storage smoke tests remain pending until a Supabase project is connected.
+
 # Tekton ECA: backend contract
 
 Generated from `src/modules.ts`. The frontend already talks to data only through the store (`src/store.tsx`), so a backend replaces its `add / update / remove / decideApproval / login` methods with API calls; screens do not change.

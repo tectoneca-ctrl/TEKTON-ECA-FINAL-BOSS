@@ -1,6 +1,6 @@
 import { useState, FC, ReactNode } from 'react'
 import { ROLES, ROLE_KEYS, Role, Tone } from '../roles'
-import { useStore, projectCodes, Rec } from '../store'
+import { useStore, projectCodes, Rec, Mutation } from '../store'
 import { Avatar, tone } from '../ui'
 import { projectMetrics, liveKpis, budgetLines, localDate, n, short, sc, sum, PM } from '../metrics'
 import { Btn, useAction, useToast } from '../ux'
@@ -15,8 +15,9 @@ const TEAL = '#35e0b5', BLUE = '#7aa2ff', AMBER = '#f5c542', VIOLET = '#c79bff',
 
 function useCtx() {
   const s = useStore()
+  const actions = useAction()
   const pms = projectMetrics(s.data)
-  return { ...s, pms, p: (k: string) => sc(s.data[k], s.proj), kpis: (role: Role) => liveKpis(role, s.data, s.users, s.proj, pms) }
+  return { ...s, act: actions.run, actionPending: actions.pending, pms, p: (k: string) => sc(s.data[k], s.proj), kpis: (role: Role) => liveKpis(role, s.data, s.users, s.proj, pms) }
 }
 
 /* ---------- project summary: one component, role-specific columns, live from records ---------- */
@@ -58,7 +59,7 @@ function PendingCard() {
   const decide = (x: Rec, s: 'Approved' | 'Rejected') => c.decideApproval(x, s)
   return (
     <Card t={`Pending approvals · ${pend.length}`} r={<a className="muted" href="#approvals">All →</a>}>
-      <Feed items={pend.map(x => ({ a: x.by, t: x.request, s: `${x.type} · requested by ${x.by}`, r: <Btns a={() => decide(x, 'Approved')} b={() => decide(x, 'Rejected')} /> }))} />
+      <Feed items={pend.map(x => ({ a: x.by, t: x.request, s: `${x.type} · requested by ${x.by}`, r: c.backend === 'supabase' && c.me?.role !== 'admin' ? <span className="muted">Admin decision</span> : <Btns a={() => decide(x, 'Approved')} b={() => decide(x, 'Rejected')} /> }))} />
     </Card>
   )
 }
@@ -97,7 +98,7 @@ function AsstMgr({ role }: P) {
         <div className="gh"><span />{Array.from({ length: 14 }, (_, i) => <span key={i} className="muted">W{i + 1}</span>)}</div>
         {rows.map((m, i) => <div className="gr" key={m.code}><span className="muted">{m.code}</span>
           <div className="gt"><i className={m.status === 'Delayed' ? 'red' : ''} style={{ left: `${(st[i % 4] / 14) * 100}%`, width: `${(ln[i % 4] / 14) * 100}%` }}><u style={{ width: `${m.progress}%` }} /></i></div></div>)}</div></Card>
-      <Card t={`Open incidents · ${inc.length}`}><Feed items={inc.map(i => ({ a: i.project, t: i.report, s: `${i.project} · ${i.severity}`, r: <button className="ghost sm" onClick={() => c.update('incidents', i.id, { status: 'Closed' })}>Close</button> }))} /></Card>
+      <Card t={`Open incidents · ${inc.length}`}><Feed items={inc.map(i => ({ a: i.project, t: i.report, s: `${i.project} · ${i.severity}`, r: <button className="ghost sm" disabled={c.actionPending} onClick={() => void c.act(() => c.update('incidents', i.id, { status: 'Closed' }))}>Close</button> }))} /></Card>
     </div>
   </>)
 }
@@ -115,7 +116,7 @@ function AttendanceVerify() {
         const [pj, dt] = g.split('|')
         const here = rs.filter(r => n(r.days) > 0)
         return { a: pj, t: `${pj} · ${dt}`, s: `${here.length} present · ${rs.length - here.length} absent · ${rs.reduce((x, r) => x + n(r.ot), 0)}h OT`,
-          r: <Btn className="sm" busy={pending} onClick={() => void act(() => { rs.forEach(r => c.update('attendance', r.id, { status: 'Approved' }, true)); c.addLog(`Approved attendance ${pj} ${dt}`) }, `Attendance approved · ${pj} ${dt}`)}>Approve all</Btn> }
+          r: <Btn className="sm" busy={pending} onClick={() => void act(async () => { await c.batch(rs.map(r => ({ action: 'update', module: 'attendance', id: r.id, data: { status: 'Approved', _version: r._version } }))); c.addLog(`Approved attendance ${pj} ${dt}`) }, `Attendance approved · ${pj} ${dt}`)}>Approve all</Btn> }
       })} />
     </Card>
   )
@@ -140,11 +141,11 @@ function SiteSup({ role }: P) {
       <Card t="Task board"><div className="kan">{['Todo', 'Ongoing', 'Done'].map(s => { const cs = tk.filter(t => t.status === s); return (
         <div key={s}><span className="muted up">{s} · {cs.length}</span>
           {cs.map(t => <div className="kc" key={t.id}><b>{t.task}</b><span className="muted">{t.crew} · {t.project}</span>
-            {next[s] && <button className="ghost sm" onClick={() => c.update('tasks', t.id, { status: next[s] })}>→ {next[s]}</button>}</div>)}</div>) })}</div></Card>
+            {next[s] && <button className="ghost sm" disabled={c.actionPending} onClick={() => void c.act(() => c.update('tasks', t.id, { status: next[s] }))}>→ {next[s]}</button>}</div>)}</div>) })}</div></Card>
       <Card t="Crew by trade (latest attendance)"><HBars rows={Object.entries(trade).map(([l, v]) => ({ l, v, max: tmax }))} />{!Object.keys(trade).length && <p className="muted">No attendance logged yet.</p>}</Card>
     </div>
     <div className="g3">
-      <Card t="Deliveries" r={<a className="muted" href="#deliveries">Open →</a>}><Feed items={c.p('deliveries').map(d => ({ a: d.supplier, t: d.item, s: `${d.supplier} · ETA ${d.eta}`, r: d.status === 'Received' ? chip('Received', '') : <button className="ghost sm" onClick={() => c.update('deliveries', d.id, { status: 'Received' })}>Mark received</button> }))} /></Card>
+      <Card t="Deliveries" r={<a className="muted" href="#deliveries">Open →</a>}><Feed items={c.p('deliveries').map(d => ({ a: d.supplier, t: d.item, s: `${d.supplier} · ETA ${d.eta}`, r: d.status === 'Received' ? chip('Received', '') : <button className="ghost sm" disabled={c.actionPending} onClick={() => void c.act(() => c.update('deliveries', d.id, { status: 'Received' }))}>Mark received</button> }))} /></Card>
       <Card t="Daily safety checklist" r={<span className="muted">{chk.filter(Boolean).length}/{items.length}</span>}>
         <div className="chks">{items.map((x, i) => <label key={x} className="chk"><input type="checkbox" checked={chk[i]} onChange={() => setChk(chk.map((v, j) => (j === i ? !v : v)))} />{x}</label>)}</div></Card>
       <AI role={role} />
@@ -171,12 +172,14 @@ function Foreman({ role }: P) {
   const set = (e: Rec, v: Partial<Mark>) => { setSaved(false); setSheet({ ...sheet, [e.id]: { ...get(e), ...v } }) }
   const pay = (e: Rec) => (get(e).p ? Math.round(n(e.rate) + get(e).ot * (n(e.rate) / 8) * 1.25) : 0)
   const present = roster.filter(e => get(e).p).length
-  const save = () => {
+  const save = async () => {
+    const ops: Mutation[] = []
     roster.filter(e => !locked(e)).forEach(e => {
       const g = get(e), ex = rec(e)
       const v = { days: g.p ? '1' : '0', ot: g.p ? String(g.ot) : '0', status: 'Pending' }
-      if (ex) c.update('attendance', ex.id, v, true); else c.add('attendance', { worker: e.name, project: code, date: td, ...v }, true)
+      ops.push(ex ? { action: 'update', module: 'attendance', id: ex.id, data: { ...v, _version: ex._version } } : { action: 'insert', module: 'attendance', data: { worker: e.name, project: code, date: td, ...v } })
     })
+    await c.batch(ops)
     c.addLog(`Saved attendance for ${code} (${td}), awaiting approval`); setSaved(true)
   }
   const pur = c.p('purchases'), ca = (c.data.cashadvance ?? []).filter(x => roster.some(e => e.name === x.worker))
@@ -327,12 +330,12 @@ function Asset({ role, seed }: P) {
       <Card t="Fleet status"><Donut d={[['Deployed', cnt('Deployed'), TEAL], ['Available', cnt('Available'), BLUE], ['Maintenance', cnt('Maintenance'), AMBER]]} center={String(as.length)} /></Card>
     </div>
     <div className="g3">
-      <Card t="Needs maintenance"><Feed items={as.filter(a => a.status === 'Maintenance' || a.condition === 'Repair').map(a => ({ a: a.asset, t: `${a.asset} ${a.code}`, s: `${a.site} · ${a.condition}`, r: <button className="ghost sm" onClick={() => c.update('assets', a.id, { status: 'Available', condition: 'Good' })}>Mark fixed</button> }))} /></Card>
+      <Card t="Needs maintenance"><Feed items={as.filter(a => a.status === 'Maintenance' || a.condition === 'Repair').map(a => ({ a: a.asset, t: `${a.asset} ${a.code}`, s: `${a.site} · ${a.condition}`, r: <button className="ghost sm" disabled={c.actionPending} onClick={() => void c.act(() => c.update('assets', a.id, { status: 'Available', condition: 'Good' }))}>Mark fixed</button> }))} /></Card>
       <Card t="Assets by site"><HBars rows={Object.entries(site).map(([l, v]) => ({ l, v, max: smax }))} /></Card>
       <AI role={role} />
     </div>
     <div className="g21">
-      <Card t={`Pending transfers · ${tr.length}`} r={<a className="muted" href="#transfers">Open →</a>}><Feed items={tr.map(t => ({ a: t.asset, t: t.asset, s: `${t.from} → ${t.to} · ${t.date}`, r: t.status === 'Approved' ? <button className="ghost sm" onClick={() => c.update('transfers', t.id, { status: 'Done' })}>Complete</button> : chip('Awaiting approval', 'warn') }))} /></Card>
+      <Card t={`Pending transfers · ${tr.length}`} r={<a className="muted" href="#transfers">Open →</a>}><Feed items={tr.map(t => ({ a: t.asset, t: t.asset, s: `${t.from} → ${t.to} · ${t.date}`, r: t.status === 'Approved' ? <button className="ghost sm" disabled={c.actionPending} onClick={() => void c.act(() => c.update('transfers', t.id, { status: 'Done' }))}>Complete</button> : chip('Awaiting approval', 'warn') }))} /></Card>
       <Pipeline role={role} />
     </div>
   </>)
@@ -348,25 +351,28 @@ function HR({ role, seed }: P) {
   const pr = c.data.payroll ?? []
   const at = !pr.length ? 0 : pr.every(r => r.status === 'Paid') ? 4 : pr.every(r => r.status !== 'Draft') ? 3 : 1
   const drafts = pr.filter(r => r.status === 'Draft'), appr = pr.filter(r => r.status === 'Approved')
-  const advance = (rows: Rec[], s: string) => { rows.forEach(r => c.update('payroll', r.id, { status: s }, true)); c.addLog(`Payroll ${s.toLowerCase()} for ${rows.length} employee(s)`) }
+  const advance = async (rows: Rec[], s: string) => { await c.batch(rows.map(r => ({ action: 'update', module: 'payroll', id: r.id, data: { status: s, _version: r._version } }))); c.addLog(`Payroll ${s.toLowerCase()} for ${rows.length} employee(s)`) }
   const leaves = (c.data.leaves ?? []).filter(l => l.status === 'Pending')
-  const decide = (l: Rec, s: string) => { c.update('leaves', l.id, { status: s }); c.addLog(`Leave ${s.toLowerCase()}: ${l.employee}`) }
+  const decide = async (l: Rec, s: string) => { await c.update('leaves', l.id, { status: s, _version: l._version }); c.addLog(`Leave ${s.toLowerCase()}: ${l.employee}`) }
   const [from, setFrom] = useState(`${today().slice(0, 8)}01`)
   const [to, setTo] = useState(today())
   const [msg, setMsg] = useState('')
   const { run: act, pending } = useAction()
   const toast = useToast()
-  const gen = () => {
+  const gen = async () => {
+    if (c.backend === 'supabase') { await c.batch([{ action: 'generate_payroll', module: 'payroll', data: { from, to } }]); setMsg('Payroll generated from approved attendance. Existing periods were kept.'); return }
     const att = (c.data.attendance ?? []).filter(a => a.status === 'Approved' && a.date >= from && a.date <= to)
     const period = `${from} to ${to}`
     let made = 0, skipped = 0
+    const ops: Mutation[] = []
     emp.forEach(e => {
       const rs = att.filter(a => a.worker === e.name)
       if (!rs.length) return
       if (pr.some(p => p.employee === e.name && p.period === period)) { skipped++; return }
       const gross = Math.round(rs.reduce((x, a) => x + n(a.days) * n(e.rate) + n(a.ot) * (n(e.rate) / 8) * 1.25, 0))
-      if (gross > 0) { c.add('payroll', { employee: e.name, period, gross: String(gross), deductions: '0', status: 'Draft' }, true); made++ }
+      if (gross > 0) { ops.push({ action: 'insert', module: 'payroll', data: { employee: e.name, period, gross: String(gross), deductions: '0', status: 'Draft' } }); made++ }
     })
+    await c.batch(ops)
     c.addLog(`Generated ${made} payroll record(s) for ${period}`)
     const m = made ? `${made} draft payroll record(s) created from approved attendance.` : skipped ? 'Payroll for this period already exists.' : 'No approved attendance in this period.'
     setMsg(m); if (made) toast.success(m); else toast.info(m)
@@ -386,7 +392,7 @@ function HR({ role, seed }: P) {
         {msg && <p className="muted hint">{msg}</p>}
         <div className="sum"><div><span className="muted">Employees</span><b>{pr.length}</b></div><div><span className="muted">Gross</span><b>{peso(sum(pr, 'gross'))}</b></div><div><span className="muted">Deductions</span><b>{peso(sum(pr, 'deductions'))}</b></div></div>
         <div className="row">{drafts.length > 0 && <Btn busy={pending} onClick={() => void act(() => advance(drafts, 'Approved'), 'Payroll approved')}>Approve {drafts.length} draft(s)</Btn>}
-          {appr.length > 0 && <Btn busy={pending} onClick={() => void act(() => advance(appr, 'Paid'), 'Payroll released')}>Release {appr.length}</Btn>}<a className="btn ghostbtn" href="#payroll">Open payroll</a></div></Card>
+          {appr.length > 0 && (c.backend === 'demo' || c.me?.role === 'admin' || c.me?.role === 'finance') && <Btn busy={pending} onClick={() => void act(() => advance(appr, 'Paid'), 'Payroll released')}>Release {appr.length}</Btn>}<a className="btn ghostbtn" href="#payroll">Open payroll</a></div></Card>
     </div>
     <div className="g21">
       <Card t={`Leave requests · ${leaves.length}`}><Feed items={leaves.map(l => ({ a: l.employee, t: l.employee, s: `${l.type} · ${l.from} to ${l.to}`, r: <Btns a={() => decide(l, 'Approved')} b={() => decide(l, 'Rejected')} lb="Decline" /> }))} /></Card>
@@ -409,11 +415,7 @@ function Finance({ role }: P) {
   const live = months.map(({ key, m }) => ({ m, c: sum(pay.filter(x => x.date.startsWith(key))), e: sum(ex.filter(x => x.date.startsWith(key))) }))
   const cats: [string, number, string][] = [['Materials', TEAL], ['Labor', BLUE], ['Equipment', AMBER], ['Other', VIOLET]].map(([k, col]) => [k, sum(ex.filter(e => e.category === k)), col])
   const tot = cats.reduce((a, x) => a + x[1], 0)
-  const markPaid = (b: Rec) => {
-    c.update('billing', b.id, { status: 'Paid' }, true)
-    c.add('payments', { client: c.pms.find(m => m.code === b.project)?.client ?? b.project, project: b.project, amount: b.amount, date: today(), method: 'Bank' }, true)
-    c.addLog(`${b.invoice} marked paid`)
-  }
+  const markPaid = (b: Rec) => c.payInvoice(b)
   return (<>
     <Strip items={c.kpis(role)} />
     <ProjectSummary role={role} />
@@ -426,7 +428,7 @@ function Finance({ role }: P) {
       <Card t="Invoices" r={<a className="muted" href="#billing">All →</a>}><div className="scroll"><table><thead><tr><th>Invoice</th><th>Amount</th><th>Status</th><th /></tr></thead>
         <tbody>{bil.slice(0, 7).map(b => <tr key={b.id}><td>{b.invoice}<br /><span className="muted">{b.project} · due {b.due}</span></td><td>{peso(n(b.amount))}</td><td>{chip(b.status, b.status === 'Paid' ? '' : tone(b.status))}</td>
           <td>{(b.status === 'Sent' || b.status === 'Overdue') && <span className="row">
-            <Btn className="ghost sm" busy={pending && cur === `r${b.id}`} disabled={pending || sent.includes(b.id)} onClick={() => { setCur(`r${b.id}`); void act(() => { setSent(x => [...x, b.id]); c.addLog(`Reminder sent for ${b.invoice}`) }, `Reminder sent for ${b.invoice}`) }}>{sent.includes(b.id) ? 'Sent ✓' : 'Remind'}</Btn>
+            <Btn className="ghost sm" busy={pending && cur === `r${b.id}`} title={c.backend === 'supabase' ? 'Email reminders are not configured yet' : undefined} disabled={c.backend === 'supabase' || pending || sent.includes(b.id)} onClick={() => { setCur(`r${b.id}`); void act(() => { setSent(x => [...x, b.id]); c.addLog(`Reminder sent for ${b.invoice}`) }, `Reminder sent for ${b.invoice}`) }}>{sent.includes(b.id) ? 'Sent ✓' : 'Remind'}</Btn>
             <Btn className="sm" busy={pending && cur === b.id} disabled={pending} onClick={() => { setCur(b.id); void act(() => markPaid(b), `${b.invoice} marked paid · payment recorded`) }}>Mark paid</Btn></span>}</td></tr>)}</tbody></table></div></Card>
       <Card t="Payables · purchases to pay"><Feed items={pur.filter(x => x.status !== 'Received').map(x => ({ a: x.supplier, t: x.item, s: `${x.supplier} · ${x.project}`, r: <b>{peso(n(x.amount))}</b> }))} /></Card>
     </div>

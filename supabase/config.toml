@@ -1,0 +1,26 @@
+project_id = "tekton-eca"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173", "https://tekton-eca-final-boss.pages.dev"]
+enable_signup = false
+minimum_password_length = 12
+
+[storage]
+enabled = true
+file_size_limit = "25MiB"
+
+[functions.manage-users]
+verify_jwt = false

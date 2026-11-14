@@ -10,3 +10,8 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+.wrangler/
+supabase/.temp/
+supabase/.branches/
+.test-results/

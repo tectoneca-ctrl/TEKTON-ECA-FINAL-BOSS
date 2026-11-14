@@ -52,8 +52,6 @@ A Direct Upload Pages project cannot be converted into a built-in Git integratio
 
 ## Current backend status
 
-This is still the browser-storage demo. Users and business records are stored in localStorage, and uploaded files are stored in IndexedDB. Hosting the frontend does not create shared records or production authentication. Data already saved in a local development browser is not copied to the live website by this deployment.
-
-Supabase has not been integrated yet. No Supabase environment variables are required by the current build. When that integration is implemented, configure the project URL and publishable key in the build environment; never put database passwords, secret keys, or service-role keys in VITE_ variables.
+The existing live deployment is still the browser-storage demo. Supabase support is implemented in source but has not yet been activated on a hosted project. Follow [Supabase setup](SUPABASE-SETUP.md) for migrations, Auth settings, the first Admin, public build variables and hosted checks. Local browser data is not imported automatically.
 
 References: [Build settings](https://developers.cloudflare.com/pages/configuration/build-configuration/), [Git integration](https://developers.cloudflare.com/pages/get-started/git-integration/), [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/).

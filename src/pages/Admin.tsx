@@ -5,21 +5,24 @@ import { ROLES, ROLE_KEYS, Role } from '../roles'
 import { useStore, projectCodes, SCOPED } from '../store'
 import { PasswordInput, Strength } from '../ui'
 import { UserAvatar } from '../UserAvatar'
-import { getLatency, setLatency, useToast } from '../ux'
+import { Btn, useAction, getLatency, setLatency, useToast } from '../ux'
 
 export function UsersPage() {
-  const { me, users, data, addUser, setRole, setFinanceView, setPassword, removeUser, setUserProject } = useStore()
+  const { me, backend, users, data, addUser, setRole, setFinanceView, setPassword, removeUser, setUserProject } = useStore()
+  const { run, pending } = useAction()
+  const minPassword = backend === 'supabase' ? 12 : 6
   const sites = projectCodes(data.projects ?? [])
   const [name, setName] = useState(''), [email, setEmail] = useState(''), [pw, setPw] = useState(''), [role, setR] = useState<Role>('foreman'), [pj, setPj] = useState('P-001'), [err, setErr] = useState('')
-  const add = () => {
+  const add = async () => {
     if (!name.trim() || !email.trim()) return setErr('Name and email are required.')
     if (users.some(u => u.email.toLowerCase() === email.trim().toLowerCase())) return setErr('That email is already registered.')
-    if (pw.length < 6) return setErr('Password must be at least 6 characters.')
-    addUser({ name: name.trim(), email: email.trim(), role, password: pw, project: SCOPED.includes(role) ? pj : undefined })
+    if (pw.length < minPassword) return setErr('Password must be at least ' + minPassword + ' characters.')
+    const ok = await run(() => addUser({ name: name.trim(), email: email.trim(), role, password: pw, project: SCOPED.includes(role) ? (sites.some(s => s.code === pj) ? pj : sites[0]?.code) : undefined }), 'User created')
+    if (!ok) return
     setName(''); setEmail(''); setPw(''); setErr('')
   }
   const roleSelect = (v: Role, on: (r: Role) => void, disabled = false) => (
-    <select value={v} disabled={disabled} onChange={e => on(e.target.value as Role)}>{ROLE_KEYS.map(k => <option key={k} value={k}>{ROLES[k].label}</option>)}</select>)
+    <select value={v} disabled={disabled || pending} onChange={e => on(e.target.value as Role)}>{ROLE_KEYS.map(k => <option key={k} value={k}>{ROLES[k].label}</option>)}</select>)
   return (
     <>
       <h1>Users &amp; Roles</h1>
@@ -30,17 +33,17 @@ export function UsersPage() {
         <PasswordInput placeholder="Temporary password" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
         {roleSelect(role, setR)}
         {SCOPED.includes(role) && <select value={pj} onChange={e => setPj(e.target.value)} title="Assigned project">{sites.map(s => <option key={s.code} value={s.code}>{s.code} · {s.name}</option>)}</select>}
-        <button onClick={add}>+ Add user</button>
+        <Btn busy={pending} onClick={() => void add()}>+ Add user</Btn>
       </div>{pw && <Strength v={pw} />}{err && <p className="formerr">{err}</p>}</div>
       <div className="card scroll"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Project</th><th>Finance summary (view-only)</th><th /></tr></thead>
         <tbody>{users.map(u => (
           <tr key={u.id}><td><span className="clock"><UserAvatar name={u.name} id={u.id} />{u.name}</span></td><td className="muted">{u.email}</td>
-            <td>{roleSelect(u.role, r => setRole(u.id, r), u.id === me?.id)}</td>
-            <td>{SCOPED.includes(u.role) ? <select value={u.project ?? ''} onChange={e => setUserProject(u.id, e.target.value)}><option value="">Unassigned</option>{sites.map(s => <option key={s.code} value={s.code}>{s.code}</option>)}</select> : <span className="muted">All</span>}</td>
-            <td><select aria-label={`Finance summary access for ${u.name}`} value={u.role === 'documents' ? u.financeViewProject ?? '' : ''} disabled={u.role !== 'documents'} onChange={e => setFinanceView(u.id, e.target.value)}><option value="">No access</option><option value="all">All projects · summary only</option>{sites.map(s => <option key={s.code} value={s.code}>{s.code} · {s.name}</option>)}</select></td>
+            <td>{roleSelect(u.role, r => { void run(() => setRole(u.id, r), 'Role updated') }, u.id === me?.id)}</td>
+            <td>{SCOPED.includes(u.role) ? <select value={u.project ?? ''} disabled={pending} onChange={e => { const project = e.target.value; void run(() => setUserProject(u.id, project), 'Project access updated') }}><option value="">Unassigned</option>{sites.map(s => <option key={s.code} value={s.code}>{s.code}</option>)}</select> : <span className="muted">All</span>}</td>
+            <td><select aria-label={`Finance summary access for ${u.name}`} value={u.role === 'documents' ? u.financeViewProject ?? '' : ''} disabled={pending || u.role !== 'documents'} onChange={e => { const scope = e.target.value; void run(() => setFinanceView(u.id, scope), 'Finance view updated') }}><option value="">No access</option><option value="all">All projects · summary only</option>{sites.map(s => <option key={s.code} value={s.code}>{s.code} · {s.name}</option>)}</select></td>
             <td><span className="row">
-              <button className="ghost sm" onClick={() => { const p = prompt(`New password for ${u.name} (min 6 characters)`, 'Welcome@2026'); if (p && p.length >= 6) setPassword(u.id, p) }}>Reset password</button>
-              {u.id !== me?.id && <button className="ghost sm" onClick={() => confirm(`Remove ${u.name}?`) && removeUser(u.id)}>Remove</button>}</span></td></tr>
+              <button className="ghost sm" onClick={() => { const p = prompt(`New password for ${u.name} (min 12 characters)`, ''); if (p && p.length >= minPassword) void run(() => setPassword(u.id, p), 'Password updated') }}>Reset password</button>
+              {u.id !== me?.id && <button className="ghost sm" onClick={() => confirm(`Remove ${u.name}?`) && void run(() => removeUser(u.id), backend === 'supabase' ? 'User access disabled' : 'User removed')}>Remove</button>}</span></td></tr>
         ))}</tbody></table></div>
     </>
   )
@@ -81,12 +84,14 @@ export function ReportsPage() {
 }
 
 export function SettingsPage() {
-  const { settings, setSettings } = useStore()
+  const { settings, setSettings, backend } = useStore()
   const toast = useToast()
+  const [draft, setDraft] = useState(settings)
+  const saveSettings = useAction()
   const [lat, setLat] = useState(getLatency() > 0)
   const num = (k: 'vat' | 'markup' | 'retention', label: string, hint: string) => (
     <label key={k}><span className="muted">{label}</span>
-      <input type="number" min={0} max={100} value={settings[k]} onChange={e => setSettings({ ...settings, [k]: Math.min(100, Math.max(0, Number(e.target.value))) })} />
+      <input type="number" min={0} max={100} value={draft[k]} onChange={e => setDraft({ ...draft, [k]: Math.min(100, Math.max(0, Number(e.target.value))) })} />
       <span className="muted hint">{hint}</span></label>)
   const [busy, setBusy] = useState(false)
   const backup = async () => {
@@ -136,20 +141,22 @@ export function SettingsPage() {
   }
   return (
     <>
-      <h1>Settings</h1><p className="muted">Company defaults. Changes are saved automatically.</p>
+      <h1>Settings</h1><p className="muted">Company defaults. Save changes to apply them.</p>
       <div className="g21">
         <div className="card form">
-          <label><span className="muted">Company name</span><input value={settings.company} onChange={e => setSettings({ ...settings, company: e.target.value })} /><span className="muted hint">Shown in the app logo tooltip.</span></label>
+          <label><span className="muted">Company name</span><input value={draft.company} onChange={e => setDraft({ ...draft, company: e.target.value })} /><span className="muted hint">Shown in the app logo tooltip.</span></label>
           {num('vat', 'VAT %', 'Will be applied by the costing and quotation modules (not built yet).')}
           {num('markup', 'Default markup %', 'Default for project costing (not built yet).')}
           {num('retention', 'Retention %', 'Default for progress billing (not built yet).')}
+          <Btn busy={saveSettings.pending} onClick={() => void saveSettings.run(() => setSettings(draft), 'Settings saved')}>Save settings</Btn>
         </div>
         <div className="card form">
           <h3>Data</h3>
-          <p className="muted">Everything lives in this browser until the backend is connected.</p>
+          <p className="muted">{backend === 'supabase' ? 'Records are stored in Supabase. Manage database backups in the Supabase dashboard; uploaded files need a separate Storage backup.' : 'Demo data is stored in this browser.'}</p>
+          {backend === 'demo' && <>
           <p className="muted hint">Backup includes accounts, project records, settings, audit history, and uploaded files. Keep the JSON private.</p>
           <label className="chk"><input type="checkbox" checked={lat} onChange={e => { setLat(e.target.checked); setLatency(e.target.checked); toast.info(e.target.checked ? 'Simulated network delay is on' : 'Simulated network delay is off') }} />Simulate network delay (shows splash, skeleton and loading states)</label>
-          <div className="row"><button className="ghost" disabled={busy} onClick={backup}>{busy ? "Preparing backup..." : "Export backup (JSON)"}</button><button className="ghost danger" disabled={busy} onClick={reset}>Reset demo data</button></div>
+          <div className="row"><button className="ghost" disabled={busy} onClick={backup}>{busy ? "Preparing backup..." : "Export backup (JSON)"}</button><button className="ghost danger" disabled={busy} onClick={reset}>Reset demo data</button></div></>}
         </div>
       </div>
     </>
