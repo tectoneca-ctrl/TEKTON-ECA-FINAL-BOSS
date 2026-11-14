@@ -1,4 +1,4 @@
-﻿# Tekton ECA (frontend)
+# Tekton ECA (frontend)
 `npm install && npm run dev`
 
 ## Demo accounts (email / password)
@@ -36,3 +36,8 @@ Splash screen, button spinner/pending (`Btn`, `useAction`), skeleton loaders on 
 ## Brand
 `src/Logo.tsx` (`Logo`, `LogoMark`) is the Tekton ECA mark re-drawn as SVG: sun behind three towers + wordmark. `dark` variant for the app UI, `light` for white backgrounds. Static files: `public/favicon.svg`, `public/logo-mark.svg`, `public/logo-light.svg` (use for print/quotations).
 
+
+## Frontend deployment
+Live frontend: https://tekton-eca-final-boss.pages.dev
+
+See [Cloudflare Pages deployment](docs/DEPLOYMENT.md) for Direct Upload commands and the current backend status. GitHub pushes do not automatically publish this site.
