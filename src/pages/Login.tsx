@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, type KeyboardEvent, useEffect, useState } from 'react'
 import { DEMO_USERS, useStore } from '../store'
 import { ROLES } from '../roles'
 import { Ic, PasswordInput } from '../ui'
@@ -78,7 +78,7 @@ export function Login() {
     requestReset(email)
     setBusy(false); setMode('sent')
   }
-  const caps$ = (e: { getModifierState: (k: string) => boolean }) => setCaps(e.getModifierState('CapsLock'))
+  const caps$ = (e: KeyboardEvent<HTMLInputElement>) => setCaps(e.getModifierState('CapsLock'))
   const back = () => { setMode('in'); setEmailErr(''); setFormErr('') }
 
   return (
