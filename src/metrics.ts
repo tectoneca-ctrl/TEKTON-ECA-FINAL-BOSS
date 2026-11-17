@@ -1,6 +1,6 @@
 import type { Rec, User } from './store'
 import type { Role, Tone } from './roles'
-import { NAV } from './modules'
+import { MODULES, NAV } from './modules'
 
 export type D = Record<string, Rec[]>
 export const n = (s?: string) => Number(s) || 0
@@ -23,11 +23,20 @@ export function budgetLines(d: D, proj: string): Rec[] {
     return { ...b, actual: String(actual), status: actual > budget ? 'Over' : budget && actual / budget >= 0.9 ? 'Warning' : 'Within' } as Rec
   })
 }
-/** Number of records pointing at a project (used to block deleting a project that is still in use). */
-export const countRefs = (d: D, code: string) => Object.entries(d).reduce((a, [k, rows]) => a + (k === 'projects' || k === 'checklist' ? 0 : rows.filter(r => r.project === code).length), 0)
+/** Module-by-module references that must be cleared before permanently deleting a project. */
+export function projectReferences(d: D, code: string, users: Pick<User, 'project' | 'financeViewProject'>[] = []) {
+  const modules = Object.entries(d)
+    .filter(([key]) => key !== 'projects')
+    .map(([key, rows]) => ({ key, label: MODULES[key]?.title ?? key, count: rows.filter(r => r.project === code).length }))
+    .filter(ref => ref.count > 0)
+  const userCount = users.filter(user => user.project === code || user.financeViewProject === code).length
+  if (userCount) modules.push({ key: 'user-access', label: 'User project / finance access', count: userCount })
+  return modules
+}
+export const countRefs = (d: D, code: string) => projectReferences(d, code).reduce((total, ref) => total + ref.count, 0)
 
 export interface PM {
-  code: string; name: string; site: string; client: string; status: string
+  code: string; name: string; site: string; poNumber: string; client: string; status: string
   budget: number; spent: number; used: number; billed: number; collected: number; balance: number; overdue: number
   progress: number; todo: number; ongoing: number; done: number; incidents: number; deliveries: number
   crew: number; ot: number; docsOk: number; assets: number; pending: number
@@ -45,7 +54,7 @@ export function projectMetrics(d: D): PM[] {
     const last = att.reduce((m, r) => (r.date > m ? r.date : m), '')
     const day = att.filter(r => r.date === last && n(r.days) > 0)
     return {
-      code, name: p.name, site: p.site, client: p.client, status: p.status,
+      code, name: p.name, site: p.site, poNumber: p.poNumber ?? '', client: p.client, status: p.status,
       budget, spent, used: budget ? Math.round((spent / budget) * 100) : 0, billed, collected,
       balance: Math.max(0, billed - collected), overdue: bil.filter(r => r.status === 'Overdue').length,
       progress: prog.length ? Math.round(sum(prog, 'percent') / prog.length) : 0,

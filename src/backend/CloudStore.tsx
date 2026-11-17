@@ -158,7 +158,15 @@ export function CloudStoreProvider({ children }: { children: ReactNode }) {
       if (!quiet) toast.success('Changes saved')
     },
     remove: async (module, id, quiet) => {
-      await commit([{ action: 'delete', module, id }])
+      if (module === 'projects') {
+        const version = latest.current.data.projects.find(project => project.id === id)?._version
+        if (!version) throw new Error('Project not found. Refresh and try again.')
+        const { error: err } = await cloudClient().rpc('erp_delete_project', { target_id: id, expected_version: Number(version) })
+        if (err) throw new Error(err.message)
+        await reloadAfterSave()
+      } else {
+        await commit([{ action: 'delete', module, id }])
+      }
       if (!quiet) toast.success('Record deleted')
     },
     decideApproval: async (a, status) => {

@@ -55,6 +55,7 @@ main{padding:24px 28px}
 .pillsel{border-radius:99px;font-size:12px;padding:7px 12px}
 table{width:100%;border-collapse:collapse;font-size:14px}th{color:var(--mut);font-weight:400;text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
 th,td{padding:10px 8px;border-bottom:1px solid var(--line)}
+.table-sort{display:inline-flex;align-items:center;gap:6px;background:transparent;color:inherit;border:0;border-radius:0;padding:0;font:inherit;font-size:inherit;font-weight:inherit;letter-spacing:inherit;text-align:left;text-transform:inherit}.table-sort:hover{color:var(--tx)}.table-sort span{color:var(--teal);font-size:11px}
 input,select{background:#091013;border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:9px 12px;font:inherit;font-size:13px}
 button{background:var(--teal);color:#032;border:0;border-radius:9px;padding:9px 14px;font:inherit;font-size:13px;font-weight:500;cursor:pointer}
 button.ghost{background:transparent;color:var(--tx);border:1px solid var(--line)}button.wide{width:100%;margin-top:8px;display:flex;justify-content:space-between}

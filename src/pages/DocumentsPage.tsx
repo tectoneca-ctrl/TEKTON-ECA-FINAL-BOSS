@@ -27,8 +27,10 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
   const actions = useAction()
   const reserved = useRef(new Map<string, { id: string; fileId: string }>())
   const docs = data.documents ?? []
-  const sites = projectCodes(data.projects ?? [])
+  const sites = projectCodes((data.projects ?? []).filter(p => p.status !== 'Archived'))
   const [project, setProject] = useState(sites[0]?.code ?? '')
+  const canUpload = sites.some(site => site.code === project)
+  const isArchivedProject = (code: string) => (data.projects ?? []).some(p => p.code === code && p.status === 'Archived')
   const [type, setType] = useState(TYPES[0])
   const [expires, setExpires] = useState('')
   const [drag, setDrag] = useState(false)
@@ -41,7 +43,8 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
   const send = async (u: Up) => {
     patch(u.id, { pct: 2, state: 'up', msg: undefined })
     try {
-      if (!u.project) throw new Error('Create or choose a project first.')
+      if (!u.project) throw new Error('Create or choose an active project first.')
+      if (isArchivedProject(u.project)) throw new Error('This project is archived. Restore it before uploading new documents.')
       const meta = { title: u.file.name.replace(/\.[^.]+$/, ''), project: u.project, type: u.type, expires: u.expires, status: 'Review', fileName: u.file.name, size: String(u.file.size), mime: u.file.type, by: me?.name ?? '', date: today() }
       if (backend === 'supabase') {
         let ref = reserved.current.get(u.id)
@@ -69,6 +72,7 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
     }
   }
   const upload = (files: FileList | File[]) => {
+    if (!canUpload) { toast.error('Choose an active project before uploading.'); return }
     const list = Array.from(files).map<Up>(f => {
       const id = `u-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       const bad = !OK.test(f.name) ? 'Unsupported file type' : f.size > MAX ? 'Larger than 25 MB' : undefined
@@ -79,7 +83,7 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
     list.filter(u => u.state === 'up').forEach(u => void send(u))
     if (input.current) input.current.value = ''
   }
-  const onDrop = (e: DragEvent) => { e.preventDefault(); setDrag(false); if (!readOnly) upload(e.dataTransfer.files) }
+  const onDrop = (e: DragEvent) => { e.preventDefault(); setDrag(false); if (!readOnly && canUpload) upload(e.dataTransfer.files) }
   const view = async (id: string, download?: string) => {
     let b: Blob | undefined
     try { b = await getFile(id) } catch (e) { toast.error((e as Error).message); return }
@@ -108,15 +112,15 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
       {!readOnly && (
         <div className="card">
           <div className="row">
-            <select value={project} onChange={e => setProject(e.target.value)}>{sites.map(s => <option key={s.code} value={s.code}>{s.code} · {s.name}</option>)}</select>
+            <select value={project} disabled={!sites.length} onChange={e => setProject(e.target.value)}>{!canUpload && project && <option value={project} disabled>{project} · Archived (restore to upload)</option>}{sites.map(s => <option key={s.code} value={s.code}>{s.code} · {s.name}</option>)}</select>
             <select value={type} onChange={e => setType(e.target.value)}>{TYPES.map(t => <option key={t}>{t}</option>)}</select>
             <label className="inl"><span className="muted">Expires</span><input type="date" value={expires} onChange={e => setExpires(e.target.value)} /></label>
           </div>
-          <div className={`updz ${drag ? 'drag' : ''}`} onClick={() => input.current?.click()} onDragOver={e => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)} onDrop={onDrop} role="button" tabIndex={0}>
+          <div className={`updz ${drag ? 'drag' : ''}`} onClick={() => canUpload && input.current?.click()} onDragOver={e => { if (canUpload) { e.preventDefault(); setDrag(true) } }} onDragLeave={() => setDrag(false)} onDrop={onDrop} role="button" aria-disabled={!canUpload} tabIndex={canUpload ? 0 : -1}>
             <Ic k="upload" s={28} />
             <b>Drop PDF or files here, or click to browse</b>
             <span className="muted">PDF, images, Word, Excel, DWG · up to 25 MB each · goes to Review after upload</span>
-            <input ref={input} type="file" multiple hidden accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.dwg,.dxf" onChange={e => e.target.files && upload(e.target.files)} />
+            <input ref={input} type="file" multiple hidden disabled={!canUpload} accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.dwg,.dxf" onChange={e => e.target.files && upload(e.target.files)} />
           </div>
           {ups.length > 0 && (
             <div className="uplist">
@@ -143,16 +147,16 @@ export function DocumentsPage({ readOnly }: { readOnly: boolean }) {
             {rows.map(d => (
               <tr key={d.id}>
                 <td><span className="clock"><span className="ext">{(d.fileName?.split('.').pop() ?? 'rec').toUpperCase()}</span>{d.title}</span></td>
-                <td>{d.project}</td><td className="muted">{d.type}</td>
+                <td>{d.project}{isArchivedProject(d.project) && <p className="muted">Archived · history only</p>}</td><td className="muted">{d.type}</td>
                 <td className="muted">{d.size ? size(Number(d.size)) : '—'}</td>
                 <td className="muted">{d.by ? `${d.by.split(' ')[0]} · ${d.date}` : 'Sample record'}</td>
                 <td className="muted">{d.expires || '—'}</td>
                 <td>{readOnly ? <span className={`chip ${tone(d.status)}`}>{d.status}</span>
-                  : <select className={`chip ${tone(d.status)}`} value={d.status} disabled={actions.pending} onChange={e => { const status = e.target.value; void actions.run(() => update('documents', d.id, { status, _version: d._version }, true), 'Document updated') }}>{STATUSES.map(s => <option key={s}>{s}</option>)}</select>}</td>
+                  : isArchivedProject(d.project) ? <span className={`chip ${tone(d.status)}`}>{d.status}</span> : <select className={`chip ${tone(d.status)}`} value={d.status} disabled={actions.pending} onChange={e => { const status = e.target.value; void actions.run(() => update('documents', d.id, { status, _version: d._version }, true), 'Document updated') }}>{STATUSES.map(s => <option key={s}>{s}</option>)}</select>}</td>
                 <td><span className="row">
                   <button className="ghost sm" disabled={!d.fileId} onClick={() => d.fileId && view(d.fileId)}>Open</button>
                   <button className="ghost sm" disabled={!d.fileId} onClick={() => d.fileId && view(d.fileId, d.fileName)}>Download</button>
-                  {!readOnly && <button className="ghost sm" onClick={() => del(d.id, d.fileId)}>Delete</button>}</span></td>
+                  {!readOnly && !isArchivedProject(d.project) && <button className="ghost sm" onClick={() => del(d.id, d.fileId)}>Delete</button>}</span></td>
               </tr>
             ))}
             {!rows.length && <tr><td colSpan={8}><Empty icon="documents" title={docs.length ? 'No matches' : 'No documents yet'} hint={docs.length ? 'Try a different search or filter.' : readOnly ? 'Nothing has been shared with you yet.' : 'Upload the first file above.'} /></td></tr>}

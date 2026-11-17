@@ -21,7 +21,8 @@ Generated from `src/modules.ts`. The frontend already talks to data only through
 | name (Site Name) | text |  |
 | client (Client) | text |  |
 | type (Project type) | select | SAQ1 / SAQ2 / CME / COLOC / RELOC |
-| site (Location) | text |  |
+| site (Site Address) | text | Free-text address; no location is prefilled |
+| poNumber (P.O. Number) | text | Optional purchase order number |
 | budget (Budget) | number |  |
 | status (Status) | select | Planning / Ongoing / Delayed / Completed |
 
@@ -230,7 +231,8 @@ Generated from `src/modules.ts`. The frontend already talks to data only through
 ## Workflows
 - **Approvals:** creating a Pending purchase, transfer or cash advance also creates an `approvals` row (`module`, `refId`). Approving/rejecting sets the linked record's status in the same transaction.
 - **Attendance:** foreman saves per worker per day as `Pending` (absent = `days: 0`). HR, site supervisor, assistant manager or admin approves; approved rows are locked for the foreman. Payroll generation reads only Approved rows.
-- **Invoices:** `Mark paid` sets status Paid and creates a `payments` row. **Projects** cannot be deleted while other records reference them.
+- **Projects:** Admin can archive and restore a project. Archived projects keep all records and audit history, disappear from active project selectors, and become read-only until restored. Permanent deletion is allowed only when every module reference, checklist row and user assignment has been removed; the UI lists remaining references and requires typing the Site ID. The database enforces the same rules and never cascades project history.
+- **Invoices:** `Mark paid` sets status Paid and creates a `payments` row.
 - **Documents:** uploads create a record in `Review` plus the file (object storage); officer sets Approved/Returned/Expired. Site compliance = approved Permit, Contract, Plan, Certificate per project.
 
 ## Access matrix (module visible per role, from `NAV`)
@@ -261,5 +263,5 @@ Estimating/BOQ and quotation, change orders, progress billing with retention, pu
 ## Site checklists (SAQ1, SAQ2, CME, COLOC, RELOC)
 - `projects.code` is the **Site ID** (typed by the user, unique, immutable). `projects.type` is the category.
 - `templates` holds the master checklist per type: sections, required documents (documents), OUT deliverables and key milestones (`key=yes`, shown in red). Only SAQ2 is filled in from the team's sheet; the other types have empty sections.
-- Creating a project copies its type's template into `checklist` rows (one per line, status Pending). Later template edits do not change existing sites. Editors can also build a checklist freehand on any site (add sections, documents, OUT lines, rename or delete sections); each addition can optionally be written back to the type's template so new sites get it, and a site's checklist can replace the template (`Save as template`). Deleting a project deletes its checklist rows.
+- Creating a project copies its type's template into `checklist` rows (one per line, status Pending). Later template edits do not change existing sites. Editors can also build a checklist freehand on any site (add sections, documents, OUT lines, rename or delete sections); each addition can optionally be written back to the type's template so new sites get it, and a site's checklist can replace the template (`Save as template`). Archiving keeps a checklist available in read-only history; permanent deletion requires an empty checklist and no other linked records or user assignments.
 - A checklist row holds a document (`Pending/Done` + date), an OUT (`Pending/Out` + date), or both: the OUT sits on the row of the document that releases it (CD -> MOC, DDD -> BP). A row with neither only keeps an empty section alive. A section is *ready* when all its documents are Done.

@@ -63,9 +63,11 @@ export function ProjectPage({ code }: { code: string }) {
   return (
     <>
       <div className="head">
-        <div><a className="muted" href="#overview">← Overview</a><h1>{m.name}</h1><p className="muted">{m.code} · {m.client} · {m.site}</p></div>
+        <div><a className="muted" href="#overview">← Overview</a><h1>{m.name}</h1><p className="muted">{m.code} · {m.client} · {m.site}{m.poNumber ? " · P.O. " + m.poNumber : ""}</p></div>
         <div className="row">{chip(m.status)}{ptype && can(me.role, 'sitedocs') && <a className="btnlink" href={`#sitedocs/${ptype}/${code}`}>Open checklist</a>}<div className="seg">{tabs.map(t => <button key={t} className={t === cur ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}</div></div>
       </div>
+
+      {m.status === 'Archived' && <div className="card muted">Archived project · read-only history. Restore it from Projects before starting new work.</div>}
 
       {cur === 'Summary' && <>
         <Strip items={[['Progress', `${m.progress}%`, m.status, m.status === 'Delayed' ? 'a' : 'g'], ['Budget', short(m.budget), '', ''], ['Spent', canSpend ? short(m.spent) : '?', canSpend ? Math.round(m.budget ? m.spent / m.budget * 100 : 0) + '% used' : 'No access', m.used > 100 ? 'r' : ''], ['Billed', canBill ? short(m.billed) : '?', '', ''], ['Collected', canCollect ? short(m.collected) : '?', '', 'g'], ['Balance', canBill && canCollect ? short(m.balance) : '?', m.overdue ? `${m.overdue} overdue` : '', m.overdue ? 'a' : '']]} />

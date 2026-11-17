@@ -58,7 +58,12 @@ select pg_temp.expect_error($q$select public.erp_mutate('[{"action":"update","mo
 select pg_temp.assert_ok((select payload->>'name'='Site One' from public.erp_projects where code='P-001'),'batch failure rolls back every operation');
 select public.erp_mutate('[{"action":"update","module":"projects","id":"10000000-0000-0000-0000-000000000001","version":1,"data":{"status":"Ongoing"}}]',gen_random_uuid());
 select pg_temp.expect_error($q$select public.erp_mutate('[{"action":"update","module":"projects","id":"10000000-0000-0000-0000-000000000001","version":1,"data":{"name":"Stale"}}]',gen_random_uuid())$q$,'Record changed');
-select pg_temp.expect_error($q$select public.erp_mutate('[{"action":"delete","module":"projects","id":"10000000-0000-0000-0000-000000000001","version":2}]',gen_random_uuid())$q$,'foreign key');
+select pg_temp.expect_error($q$select public.erp_mutate('[{"action":"delete","module":"projects","id":"10000000-0000-0000-0000-000000000001","version":2}]',gen_random_uuid())$q$,'guarded permanent-delete');
+select pg_temp.expect_error($q$select public.erp_delete_project('10000000-0000-0000-0000-000000000001',2)$q$,'linked records remain');
+select public.erp_mutate('[{"action":"insert","module":"projects","id":"10000000-0000-0000-0000-000000000003","data":{"code":"P-003","name":"Empty test site","client":"Test","type":"CME","site":"Test address","poNumber":"","budget":"1000","status":"Planning"}}]',gen_random_uuid());
+select public.erp_mutate((select jsonb_agg(jsonb_build_object('action','delete','module','checklist','id',id,'version',version)) from public.erp_records where module='checklist' and project='P-003'),gen_random_uuid());
+select public.erp_delete_project('10000000-0000-0000-0000-000000000003',1);
+select pg_temp.assert_ok(not exists(select 1 from public.erp_projects where code='P-003'),'empty project can be permanently deleted after references are removed');
 
 -- Finance operations, idempotent collection and restricted document access.
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000005',true);
@@ -116,6 +121,15 @@ select pg_temp.expect_error(format('select public.erp_mutate(%L,gen_random_uuid(
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000005',true);
 select public.erp_mutate(jsonb_build_array(jsonb_build_object('action','update','module','payroll','id',(select id from public.erp_records where module='payroll'),'version',2,'data',jsonb_build_object('status','Paid'))),gen_random_uuid());
 select pg_temp.assert_ok((select payload->>'status'='Paid' from public.erp_records where module='payroll'),'finance releases approved payroll');
+
+select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000001',true);
+select public.erp_mutate('[{"action":"update","module":"projects","id":"10000000-0000-0000-0000-000000000001","version":2,"data":{"status":"Archived","statusBeforeArchive":"Ongoing"}}]',gen_random_uuid());
+select pg_temp.assert_ok((select payload->>'status'='Archived' and payload->>'statusBeforeArchive'='Ongoing' from public.erp_projects where code='P-001'),'archive preserves prior status');
+select pg_temp.expect_error($q$select public.erp_mutate('[{"action":"insert","module":"tasks","id":"70000000-0000-0000-0000-000000000001","data":{"task":"New work","project":"P-001","crew":"Crew A","due":"2026-11-17","status":"Todo"}}]',gen_random_uuid())$q$,'project is archived');
+select pg_temp.expect_error($q$select public.erp_admin_profile((select id from public.erp_profiles where role='documents' and not disabled),'{"project":"P-001"}')$q$,'archived project');
+select pg_temp.expect_error($q$select public.erp_delete_project('10000000-0000-0000-0000-000000000001',3)$q$,'linked records remain');
+select public.erp_mutate('[{"action":"update","module":"projects","id":"10000000-0000-0000-0000-000000000001","version":3,"data":{"status":"Ongoing","statusBeforeArchive":""}}]',gen_random_uuid());
+select pg_temp.assert_ok((select payload->>'status'='Ongoing' and coalesce(payload->>'statusBeforeArchive','')='' from public.erp_projects where code='P-001'),'restore returns project to prior status');
 
 select set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000009',true);
 select pg_temp.assert_ok((select count(*)=0 from public.erp_projects),'disabled account cannot read projects');

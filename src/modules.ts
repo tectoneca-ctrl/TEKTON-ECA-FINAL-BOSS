@@ -52,14 +52,14 @@ const seedChecklist = (code: string, rows: R[], done: string[], out: string[], d
   })
 
 const list: ModuleDef[] = [
-  def('projects', 'Projects', 'code:code@Site ID,name:text@Site Name,client:text@Client,type:select(SAQ1|SAQ2|CME|COLOC|RELOC)@Project type,site:text@Location,budget:number@Budget,status:select(Planning|Ongoing|Delayed|Completed)@Status',
-    [['P-001', 'Dela Cruz 2-Storey Residence', 'Dela Cruz', 'SAQ2', 'Quezon City', '1303280', 'Ongoing'], ['P-002', 'Lim Warehouse', 'Lim Corp', 'SAQ2', 'Cavite', '3200000', 'Delayed'],
-     ['P-003', 'Santos Clinic', 'Santos', 'SAQ1', 'Pasig', '2100000', 'Ongoing'], ['P-004', 'Reyes Townhouse', 'Reyes', 'COLOC', 'Makati', '1800000', 'Planning']]),
+  def('projects', 'Projects', 'code:code@Site ID,name:text@Site Name,client:text@Client,type:select(SAQ1|SAQ2|CME|COLOC|RELOC)@Project type,site:text@Site Address,poNumber:text@P.O. Number,budget:number@Budget,status:select(Planning|Ongoing|Delayed|Completed|Archived)@Status,~statusBeforeArchive:text',
+    [['P-001', 'Dela Cruz 2-Storey Residence', 'Dela Cruz', 'SAQ2', 'Quezon City', '', '1303280', 'Ongoing'], ['P-002', 'Lim Warehouse', 'Lim Corp', 'SAQ2', 'Cavite', '', '3200000', 'Delayed'],
+     ['P-003', 'Santos Clinic', 'Santos', 'SAQ1', 'Pasig', '', '2100000', 'Ongoing'], ['P-004', 'Reyes Townhouse', 'Reyes', 'COLOC', 'Makati', '', '1800000', 'Planning']]),
   def('checklist', 'Site checklist', 'project:project,section:text,label:text,key:select(no|yes),status:select(Pending|Done),date:date,remarks:text,out:text,outKey:select(no|yes),outStatus:select(Pending|Out),outDate:date,order:number',
     [...seedChecklist('P-001', SAQ2, ['PROP DOCS', 'LA', 'BP FORMS', 'ZONNING APPLICATION', 'BP APPLICATION', 'CAAP', 'CNC', 'LOT SEG', 'SBT', 'DDD', 'DP', 'LOGBOOK', 'NTP', 'INSURANCE', 'Surety & Performance', 'TOWER FOUNDATION', 'Mill Cert'], ['BP'], '2026-10-05'),
      ...seedChecklist('P-002', SAQ2, ['PROP DOCS', 'LA', 'BP FORMS', 'ZONNING APPLICATION', 'BP APPLICATION', 'CAAP'], [], '2026-09-25'),
      ...seedChecklist('P-003', SAQ1, ['NP from Client', 'PRE VAL', 'SAQR', 'TSSR', 'Social Awareness', 'CD'], ['MOC'], '2026-09-18')]),
-  def('templates', 'Checklist templates', 'type:select(SAQ1|SAQ2|CME|COLOC|RELOC)@Type,section:text,label:text@Document,key:select(no|yes)@Key (red),out:text@OUT,outKey:select(no|yes)@OUT key (red),order:number', TEMPLATE_ROWS),
+  def('templates', 'Checklist templates', 'type:select(SAQ1|SAQ2|CME|COLOC|RELOC)@Type,section:text,label:text@Document,~key:select(no|yes)@Key (red),out:text@OUT,~outKey:select(no|yes)@OUT key (red),order:number', TEMPLATE_ROWS),
   def('progress', 'Progress', 'project:project,milestone:text,percent:number,date:date',
     [['P-001', 'Foundation', '100', '2026-08-30'], ['P-001', 'Columns and beams', '100', '2026-10-01'], ['P-001', '2nd floor slab', '60', '2026-11-05'], ['P-001', 'Walls and roofing', '0', ''], ['P-001', 'Finishing', '0', ''],
      ['P-002', 'Foundation', '100', '2026-09-10'], ['P-002', 'Columns', '70', '2026-11-01'], ['P-002', 'Slab', '20', '2026-11-05'], ['P-002', 'Walls', '0', ''],

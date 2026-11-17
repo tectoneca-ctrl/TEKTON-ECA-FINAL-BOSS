@@ -43,10 +43,10 @@ function ProjectSummary({ role }: { role: Role }) {
   return (
     <Card t={one ? one.name : 'Project summary'} r={one ? <a className="muted" href={`#project/${one.code}`}>Open project →</a> : <span className="muted">{pms.length} projects</span>}>
       {one ? (
-        <div className="facts"><div><span className="muted up">Site</span><b>{one.site}</b></div>{cols.map(([l, f]) => <div key={l}><span className="muted up">{l}</span><b>{f(one)}</b></div>)}</div>
+        <div className="facts"><div><span className="muted up">Site Address</span><b>{one.site}</b></div>{cols.map(([l, f]) => <div key={l}><span className="muted up">{l}</span><b>{f(one)}</b></div>)}</div>
       ) : (
         <div className="scroll"><table><thead><tr><th>Project</th>{cols.map(([l]) => <th key={l}>{l}</th>)}</tr></thead>
-          <tbody>{rows.map(m => <tr key={m.code}><td><a className="plink" href={`#project/${m.code}`}>{m.name}</a><br /><span className="muted">{m.code} · {m.site}</span></td>{cols.map(([l, f]) => <td key={l}>{f(m)}</td>)}</tr>)}
+          <tbody>{rows.map(m => <tr key={m.code}><td><a className="plink" href={`#project/${m.code}`}>{m.name}</a><br /><span className="muted">{m.code} · {m.site}{m.poNumber ? " · P.O. " + m.poNumber : ""}</span></td>{cols.map(([l, f]) => <td key={l}>{f(m)}</td>)}</tr>)}
             {!rows.length && <tr><td colSpan={cols.length + 1} className="muted">No projects yet.</td></tr>}</tbody></table></div>
       )}
     </Card>
@@ -69,21 +69,36 @@ function Admin({ role, range, seed }: P) {
   const c = useCtx()
   const counts = ROLE_KEYS.map(k => ({ l: ROLES[k].label, v: c.users.filter(u => u.role === k).length }))
   const mx = Math.max(1, ...counts.map(x => x.v))
+  const approvals = c.data.approvals ?? []
+  const decided = approvals.filter(x => x.status === 'Approved' || x.status === 'Rejected').length
+  const pending = approvals.filter(x => x.status === 'Pending').length
   return (<>
     <Strip items={c.kpis(role)} />
     <ProjectSummary role={role} />
     <div className="g2">
-      <Card t={ROLES[role].chartTitle} r={<span className="muted">sample trend</span>}><Trend role={role} range={range} seed={seed} /></Card>
+      <Card t={ROLES[role].chartTitle} r={<span className="muted">{c.backend === 'supabase' ? 'live approvals' : 'sample trend'}</span>}>
+        {c.backend === 'supabase' ? <>
+          <div className="trend-stats">
+            <div><span className="muted up">Submitted</span><b>{approvals.length.toLocaleString()}</b></div>
+            <div><span className="muted up">Decided</span><b>{decided.toLocaleString()}</b></div>
+            <div><span className="muted up">Pending</span><b>{pending.toLocaleString()}</b></div>
+          </div>
+          <div className="trend" style={{ height: 200, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
+            <span className="muted">{approvals.length ? 'Live counts shown above. Trend history will appear when available.' : 'No approval history yet. The trend will appear after requests are submitted.'}</span>
+          </div>
+        </> : <Trend role={role} range={range} seed={seed} />}
+      </Card>
       <Card t="Users by role" r={<a className="muted" href="#users">Manage →</a>}><HBars rows={counts.map(x => ({ ...x, max: mx }))} /></Card>
     </div>
     <div className="g3">
       <PendingCard />
       <Card t="Recent activity" r={<a className="muted" href="#audit">Audit log →</a>}><Feed items={c.log.slice(0, 6).map(l => ({ a: l.by, t: l.msg, s: l.at }))} /></Card>
-      <AI role={role} />
+      {c.backend === 'supabase'
+        ? <div className="card ai"><div className="ring" /><span className="muted up">Tekton assistant</span><p>No live alerts yet. This panel will show items that need attention from project activity.</p></div>
+        : <AI role={role} />}
     </div>
   </>)
 }
-
 /* ---------- ASSISTANT MANAGER ---------- */
 function AsstMgr({ role }: P) {
   const c = useCtx()

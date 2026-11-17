@@ -2,6 +2,7 @@ import { isCloud } from './backend/client'
 import { CloudStoreProvider } from './backend/CloudStore'
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { MODULES, AUTO_APPROVAL } from './modules'
+import { projectReferences } from './metrics'
 import { useToast } from './ux'
 import type { Role } from './roles'
 
@@ -103,7 +104,10 @@ function DemoStoreProvider({ children }: { children: ReactNode }) {
       setUsers(x => x.map(u => (u.id === me.id ? { ...u, password: nw } : u))); note('Changed own password'); return null
     },
     me, users, data, log, settings, setSettings, proj, setProj: setSel, addLog: note,
-    setUserProject: (id, code) => setUsers(x => x.map(u => (u.id === id ? { ...u, project: code } : u))),
+    setUserProject: (id, code) => {
+      if (code && data.projects.some(p => p.code === code && p.status === 'Archived')) throw new Error('Cannot assign a user to an archived project. Restore it first.')
+      setUsers(x => x.map(u => (u.id === id ? { ...u, project: code } : u)))
+    },
     verify: (email, password) => users.some(x => x.email.toLowerCase() === email.trim().toLowerCase() && x.password === password),
     requestReset: email => {
       const u = users.find(x => x.email.toLowerCase() === email.trim().toLowerCase())
@@ -123,18 +127,23 @@ function DemoStoreProvider({ children }: { children: ReactNode }) {
     },
     logout: () => { clearMe(); setMeId(null); toast.info('Signed out') },
     setPassword: (id, pw) => { setUsers(x => x.map(u => (u.id === id ? { ...u, password: pw } : u))); note(`Reset password of user #${id}`) },
-    addUser: u => { setUsers(x => [...x, { ...u, id: Date.now() }]); note(`Created user ${u.name} as ${u.role}`) },
+    addUser: u => {
+      if (u.project && data.projects.some(p => p.code === u.project && p.status === 'Archived')) throw new Error('Cannot assign a new user to an archived project.')
+      setUsers(x => [...x, { ...u, id: Date.now() }]); note(`Created user ${u.name} as ${u.role}`)
+    },
     setRole: (id, r) => { setUsers(x => x.map(u => (u.id === id ? { ...u, role: r, financeViewProject: r === 'documents' ? u.financeViewProject : undefined } : u))); note(`Changed role of user #${id} to ${r}`) },
     setFinanceView: (id, scope) => {
       if (me?.role !== 'admin') return
       const target = users.find(u => u.id === id)
       const valid = !scope || scope === 'all' || (data.projects ?? []).some(p => p.code === scope)
-      if (!target || target.role !== 'documents' || !valid) return
+      if (!target || target.role !== 'documents' || !valid || data.projects.some(p => p.code === scope && p.status === 'Archived')) return
       setUsers(x => x.map(u => (u.id === id ? { ...u, financeViewProject: scope || undefined } : u)))
       note(scope ? `Granted read-only Finance summary to ${target.name} (${scope})` : `Revoked read-only Finance summary from ${target.name}`)
     },
     removeUser: id => { setUsers(x => x.filter(u => u.id !== id)); note(`Removed user #${id}`) },
     add: (k, r, quiet) => {
+      if (k === 'projects' && r.status === 'Archived') throw new Error('Create the project first, then use Archive from the Admin Projects page.')
+      if (k !== 'projects' && r.project && data.projects.some(p => p.code === r.project && p.status === 'Archived')) throw new Error('This project is archived. Restore it before adding new records.')
       const id = uid()
       const auto = AUTO_APPROVAL[k]
       setData(d => {
@@ -147,6 +156,8 @@ function DemoStoreProvider({ children }: { children: ReactNode }) {
       return id
     },
     decideApproval: (a, status) => {
+      const linked = a.module && a.refId ? data[a.module]?.find(x => x.id === a.refId) : undefined
+      if (linked?.project && data.projects.some(p => p.code === linked.project && p.status === 'Archived')) throw new Error('This project is archived. Restore it before changing linked approvals.')
       setData(d => {
         const next: Record<string, Rec[]> = { ...d, approvals: (d.approvals ?? []).map(x => (x.id === a.id ? { ...x, status } : x)) }
         if (a.module && a.refId && next[a.module]) next[a.module] = next[a.module].map(x => (x.id === a.refId ? { ...x, status } : x))
@@ -155,8 +166,34 @@ function DemoStoreProvider({ children }: { children: ReactNode }) {
       note(`${status}: ${a.request}`)
       toast.success(`${status}: ${a.request}`)
     },
-    update: (k, id, p, quiet) => { setData(d => ({ ...d, [k]: (d[k] ?? []).map(r => (r.id === id ? { ...r, ...p } : r)) })); if (!quiet) toast.success('Changes saved') },
-    remove: (k, id, quiet) => { setData(d => { const gone = (d[k] ?? []).find(r => r.id === id); const next: Record<string, Rec[]> = { ...d, [k]: (d[k] ?? []).filter(r => r.id !== id) }; if (k === 'projects' && gone) next.checklist = (d.checklist ?? []).filter(c => c.project !== gone.code); return next }); note(`Deleted record in ${MODULES[k].title}`); if (!quiet) toast.success('Record deleted') },
+    update: (k, id, p, quiet) => {
+      const currentRecord = (data[k] ?? []).find(r => r.id === id)
+      if (!currentRecord) throw new Error('Record not found. Refresh and try again.')
+      if (k === 'projects') {
+        const changingArchiveState = currentRecord.status !== p.status && (currentRecord.status === 'Archived' || p.status === 'Archived')
+        if (changingArchiveState && me?.role !== 'admin') throw new Error('Only Admin can archive or restore a project.')
+        if (currentRecord.status === 'Archived' && p.status === 'Archived' && Object.keys(p).some(key => !['_version'].includes(key))) throw new Error('Restore this archived project before editing it.')
+      } else if (currentRecord.project && data.projects.some(project => project.code === currentRecord.project && project.status === 'Archived') && p.project === undefined) {
+        throw new Error('This project is archived. Restore it before changing its records.')
+      }
+      if (k !== 'projects' && p.project && data.projects.some(project => project.code === p.project && project.status === 'Archived')) throw new Error('This project is archived. Restore it before moving records into it.')
+      setData(d => ({ ...d, [k]: (d[k] ?? []).map(r => (r.id === id ? { ...r, ...p } : r)) }))
+      if (!quiet) toast.success('Changes saved')
+    },
+    remove: (k, id, quiet) => {
+      const record = (data[k] ?? []).find(r => r.id === id)
+      if (!record) throw new Error('Record not found. Refresh and try again.')
+      if (k === 'projects') {
+        if (me?.role !== 'admin') throw new Error('Only Admin can permanently delete a project.')
+        const refs = projectReferences(data, record.code, users)
+        if (refs.length) throw new Error(`Cannot permanently delete ${record.code}: ${refs.map(ref => `${ref.label} (${ref.count})`).join(', ')}. Archive it to preserve its history.`)
+      } else if (record.project && data.projects.some(project => project.code === record.project && project.status === 'Archived')) {
+        throw new Error('This project is archived. Restore it before removing linked records.')
+      }
+      setData(d => { const gone = (d[k] ?? []).find(r => r.id === id); const next: Record<string, Rec[]> = { ...d, [k]: (d[k] ?? []).filter(r => r.id !== id) }; if (k === 'projects' && gone) next.checklist = (d.checklist ?? []).filter(c => c.project !== gone.code); return next })
+      note(`Deleted record in ${MODULES[k].title}`)
+      if (!quiet) toast.success('Record deleted')
+    },
   }
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
 }

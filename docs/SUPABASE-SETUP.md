@@ -16,7 +16,7 @@ Supabase mode never falls back to demo data on a configuration or network error.
 ## Activate a new Supabase project
 
 1. Create a Supabase account and a new project for this company. Keep its database password private. The Supabase integration can be installed and connected here to complete setup together; the project link is sufficient to identify the intended project.
-2. Apply both SQL migrations in supabase/migrations, in filename order. They create the ERP schema, validation rules, access matrix and checklist template defaults. They do not create business projects or employee/demo accounts.
+2. Apply all SQL migrations in supabase/migrations, in filename order. They create the ERP schema, validation rules, access matrix, checklist template defaults, project address/P.O. fields and the guarded project archive/delete flow. They do not create business projects or employee/demo accounts.
 3. Deploy supabase/functions/manage-users. It verifies the caller's access token with Supabase Auth and checks the current Admin role before calling any Auth Admin API.
 4. Set Auth Site URL to https://tekton-eca-final-boss.pages.dev. Add that exact URL and http://localhost:5173 to allowed redirect URLs. Disable public signup. Set the minimum password length to 12. Configure your SMTP provider before relying on password-reset delivery to staff.
 5. Create the first real administrator, using the process below.

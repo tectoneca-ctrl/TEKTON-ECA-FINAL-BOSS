@@ -12,12 +12,13 @@ export function UsersPage() {
   const { run, pending } = useAction()
   const minPassword = backend === 'supabase' ? 12 : 6
   const sites = projectCodes(data.projects ?? [])
+  const activeSites = projectCodes((data.projects ?? []).filter(p => p.status !== 'Archived'))
   const [name, setName] = useState(''), [email, setEmail] = useState(''), [pw, setPw] = useState(''), [role, setR] = useState<Role>('foreman'), [pj, setPj] = useState('P-001'), [err, setErr] = useState('')
   const add = async () => {
     if (!name.trim() || !email.trim()) return setErr('Name and email are required.')
     if (users.some(u => u.email.toLowerCase() === email.trim().toLowerCase())) return setErr('That email is already registered.')
     if (pw.length < minPassword) return setErr('Password must be at least ' + minPassword + ' characters.')
-    const ok = await run(() => addUser({ name: name.trim(), email: email.trim(), role, password: pw, project: SCOPED.includes(role) ? (sites.some(s => s.code === pj) ? pj : sites[0]?.code) : undefined }), 'User created')
+    const ok = await run(() => addUser({ name: name.trim(), email: email.trim(), role, password: pw, project: SCOPED.includes(role) ? (activeSites.some(s => s.code === pj) ? pj : activeSites[0]?.code) : undefined }), 'User created')
     if (!ok) return
     setName(''); setEmail(''); setPw(''); setErr('')
   }
@@ -32,7 +33,7 @@ export function UsersPage() {
         <input placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
         <PasswordInput placeholder="Temporary password" autoComplete="new-password" value={pw} onChange={e => setPw(e.target.value)} />
         {roleSelect(role, setR)}
-        {SCOPED.includes(role) && <select value={pj} onChange={e => setPj(e.target.value)} title="Assigned project">{sites.map(s => <option key={s.code} value={s.code}>{s.code} · {s.name}</option>)}</select>}
+        {SCOPED.includes(role) && <select value={pj} onChange={e => setPj(e.target.value)} title="Assigned project">{activeSites.map(s => <option key={s.code} value={s.code}>{s.code} · {s.name}</option>)}</select>}
         <Btn busy={pending} onClick={() => void add()}>+ Add user</Btn>
       </div>{pw && <Strength v={pw} />}{err && <p className="formerr">{err}</p>}</div>
       <div className="card scroll"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Project</th><th>Finance summary (view-only)</th><th /></tr></thead>

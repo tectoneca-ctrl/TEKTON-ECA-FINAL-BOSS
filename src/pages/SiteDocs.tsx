@@ -14,10 +14,11 @@ export function TypeCards() {
   const { data } = useStore()
   return (
     <div className="tcards">{TYPES.map(t => {
-      const s = typeSummary(data, t)
+      const activeData = { ...data, projects: (data.projects ?? []).filter(p => p.status !== 'Archived') }
+      const s = typeSummary(activeData, t)
       return (
         <a className="tcard" key={t} href={`#sitedocs/${t}`}>
-          <div className="th"><b>{t}</b><span className="muted">{s.sites} site{s.sites === 1 ? '' : 's'}</span></div>
+          <div className="th"><b>{t}</b><span className="muted">{s.sites} active site{s.sites === 1 ? '' : 's'}</span></div>
           <div className="tp"><Prog v={s.pct} /><span>{s.items ? `${s.pct}%` : '—'}</span></div>
           <div className="tm"><span>{s.done}/{s.items} docs</span><span className={s.outed ? 'yl' : ''}>{s.outed}/{s.outs} OUT</span>{s.keyPending > 0 && <span className="rd">{s.keyPending} key pending</span>}</div>
         </a>)
@@ -28,10 +29,11 @@ export function TypeCards() {
 function SiteTable({ sites }: { sites: Rec[] }) {
   const { data } = useStore()
   const [q, setQ] = useState('')
-  const shown = sites.filter(p => `${p.code} ${p.name} ${p.client}`.toLowerCase().includes(q.toLowerCase()))
+  const [lifecycle, setLifecycle] = useState('Active')
+  const shown = sites.filter(p => (lifecycle === 'All' || (lifecycle === 'Active' ? p.status !== 'Archived' : p.status === 'Archived')) && `${p.code} ${p.name} ${p.client}`.toLowerCase().includes(q.toLowerCase()))
   return (
     <>
-      <div className="card toolbar"><input placeholder="Search site ID, name or client…" value={q} onChange={e => setQ(e.target.value)} /></div>
+      <div className="card toolbar"><input placeholder="Search site ID, name or client…" value={q} onChange={e => setQ(e.target.value)} /><label>Project view<select aria-label="Project lifecycle filter" value={lifecycle} onChange={e => setLifecycle(e.target.value)}><option>Active</option><option>Archived</option><option>All</option></select></label></div>
       <div className="card scroll">
         <table>
           <thead><tr><th>Site ID</th><th>Site name</th><th>Client</th><th>Type</th><th>Status</th><th>Documents</th><th>OUT</th></tr></thead>
@@ -59,7 +61,7 @@ function Home() {
     <>
       <h1>Site documents</h1><p className="muted">Pumili ng kategorya para makita ang checklist ng bawat site.</p>
       <Card t="Categories"><TypeCards /></Card>
-      <Card t="All sites"><p className="muted">{(data.projects ?? []).length} sites</p></Card>
+      <Card t="All sites"><p className="muted">{(data.projects ?? []).filter(p => p.status !== 'Archived').length} active · {(data.projects ?? []).filter(p => p.status === 'Archived').length} archived</p></Card>
       <SiteTable sites={data.projects ?? []} />
     </>
   )
@@ -68,7 +70,7 @@ function Home() {
 function TypePage({ type }: { type: string }) {
   const { me, data } = useStore()
   const sites = (data.projects ?? []).filter(p => p.type === type)
-  const s = typeSummary(data, type)
+  const s = typeSummary({ ...data, projects: sites.filter(p => p.status !== 'Archived') }, type)
   const hasTpl = (data.templates ?? []).some(t => t.type === type && (t.label || t.out))
   return (
     <>
@@ -96,7 +98,7 @@ function Board({ code }: { code: string }) {
   const [dlg, setDlg] = useState<Dlg | null>(null)
   const [form, setForm] = useState(BLANK)
   const [err, setErr] = useState('')
-  const edit = !pending && !!me && EDIT.includes(me.role)
+  const edit = !pending && !!me && EDIT.includes(me.role) && p?.status !== 'Archived'
   if (!p) return <><h1>Site not found</h1><a className="btn" href="#sitedocs">Back to site documents</a></>
   const secs = sections(rows), st = siteStats(rows)
   const tplRows = (data.templates ?? []).filter(t => t.type === p.type)
@@ -188,6 +190,7 @@ function Board({ code }: { code: string }) {
       </div>
       <Strip items={[['Documents', `${st.done}/${st.items}`, st.items ? `${st.pct}%` : '', st.pct === 100 ? 'g' : ''], ['OUT released', `${st.outed}/${st.outs}`, '', st.outed ? 'g' : ''], ['Key items pending', String(st.keyPending), '', st.keyPending ? 'a' : ''], ['Sections complete', `${secs.filter(s => s.ready).length}/${secs.length}`, '', '']]} />
 
+      {p.status === 'Archived' && <div className="card muted">Archived project · checklist and site history are available for review. Restore it from Projects before making changes.</div>}
       {!rows.length ? (
         <div className="card"><Empty icon="documents" title="No checklist for this site yet" hint={edit ? `Load the ${p.type} template, or start blank and add your own sections and rows.` : 'The Documents team has not set up this checklist yet.'}
           action={edit ? <span className="row">{tplRows.length > 0 && <button onClick={() => void run(load)}>Load {p.type} template</button>}<button className={tplRows.length ? 'ghost' : ''} onClick={() => open({ mode: 'section' })}>Start blank · add a section</button></span> : undefined} /></div>
