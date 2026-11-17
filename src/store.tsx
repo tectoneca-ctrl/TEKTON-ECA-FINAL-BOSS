@@ -1,4 +1,3 @@
-import { isCloud } from './backend/client'
 import { CloudStoreProvider } from './backend/CloudStore'
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { MODULES, AUTO_APPROVAL } from './modules'
@@ -64,7 +63,9 @@ export const StoreContext = createContext<Store>(null as unknown as Store)
 export const useStore = () => useContext(StoreContext)
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  return isCloud ? <CloudStoreProvider>{children}</CloudStoreProvider> : <DemoStoreProvider>{children}</DemoStoreProvider>
+  return import.meta.env.PROD || import.meta.env.VITE_BACKEND_MODE === 'supabase'
+    ? <CloudStoreProvider>{children}</CloudStoreProvider>
+    : <DemoStoreProvider>{children}</DemoStoreProvider>
 }
 function DemoStoreProvider({ children }: { children: ReactNode }) {
   const toast = useToast()

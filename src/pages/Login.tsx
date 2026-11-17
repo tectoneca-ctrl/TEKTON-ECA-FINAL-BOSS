@@ -8,7 +8,7 @@ import { Btn, SuccessState, getLatency, sleep } from '../ux'
 import { UserAvatar } from '../UserAvatar'
 
 /** Demo build only: set to false before going live so the demo accounts panel disappears. */
-const SHOW_DEMO = !isCloud
+const SHOW_DEMO = import.meta.env.DEV && import.meta.env.VITE_BACKEND_MODE !== 'supabase'
 const MAX_TRIES = 5
 const LOCK_SECONDS = 30
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
